@@ -3,7 +3,7 @@ use std::path::Path;
 use tokio::time::{sleep, Duration, Instant};
 
 use crate::commands::Webhook;
-use crate::errors::{AppError, AppResult, ProgressState, safe_emit_event, safe_database_operation};
+use crate::errors::{AppError, AppResult, ProgressState, safe_emit_event};
 use crate::{database, image_processor, security};
 
 use super::discord_client::{DiscordClient, UploadPayload, extract_thread_id};

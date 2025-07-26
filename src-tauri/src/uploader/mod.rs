@@ -63,16 +63,4 @@ pub async fn retry_single_upload_legacy(
     ).await
 }
 
-/// Main entry point for processing upload queues
-/// 
-/// This function coordinates the entire upload process:
-/// 1. Validates input files
-/// 2. Groups images by metadata (if requested)
-/// 3. Processes each group with Discord rate limiting
-/// 4. Handles forum channel thread creation
-/// 5. Tracks progress and handles cancellation
-/// 6. Provides comprehensive error handling
-pub use upload_queue::process_upload_queue as upload_images;
 
-/// Entry point for retrying individual failed uploads
-pub use retry::retry_single_upload as retry_upload;

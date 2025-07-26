@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::commands::ImageMetadata;
 use crate::errors::{AppError, AppResult};
-use crate::security::{InputValidator, FileSystemGuard};
+use crate::security::InputValidator;
 
 pub async fn embed_metadata(file_path: &str, metadata: ImageMetadata) -> AppResult<String> {
     // Validate input
