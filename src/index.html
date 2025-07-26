@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VRChat Photo Uploader</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./main.ts"></script>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 class="title">VRChat Photo Uploader</h1>
+      <p class="subtitle">
+        Upload your VRChat photos to Discord with smart grouping and metadata
+      </p>
+      <div class="version-info">
+        <span id="versionText"></span>
+      </div>
+    </div>
+
+    <!-- Webhook Selection -->
+    <div class="card">
+      <h2 class="card-title">🎯 Webhook Selection</h2>
+      <div class="webhook-selector">
+        <select id="webhookSelect" class="form-control">
+          <option value="">Select a webhook...</option>
+        </select>
+        <button id="manageWebhooksBtn" class="btn btn-secondary">
+          🔧 Manage
+        </button>
+      </div>
+    </div>
+
+    <!-- Upload Settings -->
+    <div class="card">
+      <h2 class="card-title">⚙️ Upload Settings</h2>
+      <div class="settings-grid">
+        <div class="form-group">
+          <div class="checkbox-group">
+            <input
+              type="checkbox"
+              id="groupByMetadata"
+              class="checkbox"
+              checked
+            />
+            <label for="groupByMetadata" class="form-label"
+              >📋 Group by metadata</label
+            >
+          </div>
+          <div class="checkbox-group">
+            <input type="checkbox" id="isForumChannel" class="checkbox" />
+            <label for="isForumChannel" class="form-label"
+              >💬 Discord Forum Channel</label
+            >
+          </div>
+        </div>
+          <div class="checkbox-group">
+            <input type="checkbox" id="includePlayerNames" class="checkbox" checked />
+            <label for="includePlayerNames" class="form-label">👥 Include player names in posts</label>
+          </div>
+        <div class="form-group">
+          <label for="maxImages" class="form-label"
+            >📊 Max images per message</label
+          >
+          <select id="maxImages" class="form-control">
+            <option value="1">1</option>
+            <option value="5">5</option>
+            <option value="10" selected>10</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- File Upload Area -->
+    <div class="card">
+      <h2 class="card-title">📁 File Upload</h2>
+      <div class="drop-zone" id="dropZone">
+        <div class="drop-zone-icon">📸</div>
+        <div class="drop-zone-text">Drag & drop your VRChat photos here</div>
+        <div class="drop-zone-subtext">or click to browse files</div>
+        <input
+          type="file"
+          id="fileInput"
+          multiple
+          accept="image/*"
+          class="hidden"
+        />
+      </div>
+
+      <div id="uploadQueue" class="upload-queue hidden">
+        <div class="queue-header">
+          <h3>📋 Upload Queue</h3>
+          <div class="queue-actions">
+            <button id="selectAllBtn" class="btn btn-small btn-secondary">
+              ✅ Select All
+            </button>
+            <button id="deselectAllBtn" class="btn btn-small btn-secondary">
+              ❌ Deselect All
+            </button>
+            <button id="removeSelectedBtn" class="btn btn-small btn-secondary">
+              🗑️ Remove Selected
+            </button>
+          </div>
+          <div class="form-help">
+            Hold Ctrl and hover over thumbnails for quick previews.
+          </div>
+        </div>
+        
+        <div id="progressSummary" class="progress-summary hidden">
+          <div class="progress-info">
+            <span id="progressText" class="progress-text">Preparing upload…</span>
+            <span id="progressCount">0 / 0</span>
+            <span id="estimatedTime" class="estimated-time hidden">ETA: --</span>
+          </div>
+          <div class="progress-bar-container">
+            <div id="overallProgressBar" class="progress-bar-overall">
+              <div id="overallProgressFill" class="progress-bar-fill"></div>
+            </div>
+          </div>
+        </div>
+        
+        <div id="queueItems" class="queue-items"></div>
+        
+        <div class="upload-controls">
+          <button id="startUpload" class="btn btn-primary">
+            🚀 Start Upload
+          </button>
+          <button id="pauseUpload" class="btn btn-secondary hidden">
+            ⏸️ Pause
+          </button>
+          <button id="clearQueue" class="btn btn-secondary">
+            🗑️ Clear Queue
+          </button>
+          <button id="retryFailed" class="btn btn-secondary hidden">
+            🔄 Retry Failed
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card">
+      <h2 class="card-title">⚡ Quick Actions</h2>
+      <div class="quick-actions">
+        <button id="openVRChatFolderBtn" class="btn btn-secondary">
+          📂 Open VRChat Folder
+        </button>
+      </div>
+    </div>
+
+    <!-- Metadata Tools -->
+    <div class="card">
+      <h2 class="card-title">📝 Metadata Tools</h2>
+      <div class="tools-grid">
+        <button id="viewMetadataBtn" class="btn btn-secondary" disabled>
+          👁️ View Metadata
+        </button>
+        <button id="metadataEditorBtn" class="btn btn-secondary">
+          ✏️ Edit Metadata
+        </button>
+      </div>
+      <div class="form-help">
+        Select files in the upload queue to view or edit their metadata.
+      </div>
+    </div>
+
+    <!-- Application Settings -->
+    <div class="card">
+      <h2 class="card-title">🛠️ Application Settings</h2>
+      <div class="tools-grid">
+        <button id="settingsBtn" class="btn btn-secondary">
+          ⚙️ Preferences
+        </button>
+        <button id="aboutBtn" class="btn btn-secondary">
+          ℹ️ About
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Webhooks Modal -->
+  <div id="webhookModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">🔧 Manage Webhooks</h3>
+        <button class="close-btn" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="webhookName" class="form-label">Webhook Name</label>
+          <input
+            type="text"
+            id="webhookName"
+            class="form-control"
+            placeholder="My Discord Server"
+            maxlength="100"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="webhookUrl" class="form-label">Webhook URL</label>
+          <input
+            type="url"
+            id="webhookUrl"
+            class="form-control"
+            placeholder="https://discord.com/api/webhooks/…"
+          />
+          <div class="form-help">
+            Get this from Discord: Server Settings → Integrations → Webhooks
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="addWebhookBtn" class="btn btn-primary">
+            ➕ Add Webhook
+          </button>
+        </div>
+
+        <div class="form-group">
+          <label for="existingWebhooks" class="form-label">Existing Webhooks</label>
+          <select id="existingWebhooks" class="form-control">
+            <option value="">Select webhook to manage…</option>
+          </select>
+          <div class="webhook-actions">
+            <button id="deleteWebhookBtn" class="btn btn-secondary">
+              🗑️ Delete Selected
+            </button>
+            <button id="editWebhookBtn" class="btn btn-secondary">
+              ✏️ Edit Selected
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">⚙️ Preferences</h3>
+        <button class="close-btn" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="settings-content">
+          <div id="generalSettings" class="settings-panel">
+            <div class="form-group">
+              <label for="themeSelect" class="form-label">Theme</label>
+              <select id="themeSelect" class="form-control">
+                <option value="dark">🌙 Dark</option>
+                <option value="light">☀️ Light</option>
+                <option value="auto">🔄 Auto</option>
+              </select>
+            </div>
+            
+            <div class="checkbox-group">
+              <input type="checkbox" id="enableNotifications" class="checkbox" checked />
+              <label for="enableNotifications" class="form-label">Show upload notifications</label>
+            </div>
+            
+            <div class="checkbox-group">
+              <input type="checkbox" id="enableGlobalShortcuts" class="checkbox" checked />
+              <label for="enableGlobalShortcuts" class="form-label">Enable global shortcuts</label>
+            </div>
+            
+            <div class="checkbox-group">
+              <input type="checkbox" id="enableImagePreview" class="checkbox" checked />
+              <label for="enableImagePreview" class="form-label">Enable Ctrl+Hover image previews</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">VRChat Folder</label>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <span id="currentVRChatPath" class="form-help" style="flex: 1; margin: 0;">
+              No folder selected
+            </span>
+            <button id="clearVRChatFolderBtn" class="btn btn-small btn-secondary" disabled>
+              🗑️ Clear
+            </button>
+          </div>
+          <div class="form-help">Current VRChat photos folder location</div>
+        </div>
+      </div>
+        <div class="modal-actions">
+          <button id="saveSettingsBtn" class="btn btn-primary">
+            💾 Save Settings
+          </button>
+          <button id="cancelSettingsBtn" class="btn btn-secondary">
+            ❌ Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- About Modal -->
+  <div id="aboutModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">ℹ️ About VRChat Photo Uploader</h3>
+        <button class="close-btn" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="about-content">
+          <div class="app-icon">📸</div>
+          <h2>VRChat Photo Uploader</h2>
+          <p class="version-info">Version <span id="aboutVersion">2.0.0</span></p>
+          
+          <p class="description">
+            A powerful tool for uploading VRChat photos to Discord with intelligent 
+            grouping, metadata extraction, and automatic compression when needed.
+          </p>
+
+          <div class="features">
+            <h3>Features:</h3>
+            <ul>
+              <li>🏷️ Automatic metadata extraction from VRChat photos</li>
+              <li>📋 Smart grouping by world and players</li>
+              <li>🗜️ Automatic compression only when Discord requires it</li>
+              <li>🔄 Retry failed uploads with exponential backoff</li>
+              <li>📊 Upload statistics and progress tracking</li>
+              <li>🎨 Dark/Light theme support</li>
+              <li>⚡ Global keyboard shortcuts</li>
+              <li>💬 Discord Forum channel support</li>
+              <li>👁️ Ctrl+Hover image previews in upload queue</li>
+            </ul>
+          </div>
+
+          <div class="shortcuts">
+            <h3>Keyboard Shortcuts:</h3>
+            <div class="shortcut-list">
+              <div class="shortcut-item">
+                <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>U</kbd>
+                <span>Upload files</span>
+              </div>
+              <div class="shortcut-item">
+                <kbd>Ctrl</kbd> + <span>Hover</span>
+                <span>Preview image thumbnails</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="credits">
+            <p>Created by <strong>Fynn9563</strong></p>
+            <p>Made with ❤️ for the VRChat community</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- Metadata Editor Modal -->
+<div id="metadataEditorModal" class="modal hidden">
+  <div class="modal-content" style="max-width: 800px;">
+    <div class="modal-header">
+      <h3 class="modal-title">📝 Metadata Editor</h3>
+      <button class="close-btn" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="modal-body">
+      <!-- Load Existing Metadata Section -->
+      <div class="form-group">
+        <label class="form-label">Load Existing Metadata</label>
+        <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
+          <button id="loadPngMetadataBtn" class="btn btn-secondary">📂 Load PNG Metadata</button>
+          <span id="creationDate" style="color: var(--text-muted); font-size: 0.875rem;"></span>
+        </div>
+      </div>
+
+      <!-- Raw JSON Section -->
+      <div class="form-group">
+        <label for="rawJsonText" class="form-label">Or Paste Raw JSON:</label>
+        <textarea 
+          id="rawJsonText" 
+          class="form-control" 
+          rows="6" 
+          placeholder="Paste JSON metadata here..."
+        ></textarea>
+        <button id="loadRawJsonBtn" class="btn btn-secondary" style="margin-top: 8px;">📋 Load Raw JSON</button>
+      </div>
+
+      <!-- Metadata Form Fields -->
+      <div class="settings-grid">
+        <div class="form-group">
+          <label for="authorDisplayName" class="form-label">Author Display Name</label>
+          <input type="text" id="authorDisplayName" class="form-control" placeholder="Player display name">
+        </div>
+
+        <div class="form-group">
+          <label for="authorId" class="form-label">Author ID</label>
+          <input type="text" id="authorId" class="form-control" placeholder="usr_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        </div>
+
+        <div class="form-group">
+          <label for="worldName" class="form-label">World Name</label>
+          <input type="text" id="worldName" class="form-control" placeholder="World name">
+        </div>
+
+        <div class="form-group">
+          <label for="worldId" class="form-label">World ID</label>
+          <input type="text" id="worldId" class="form-control" placeholder="wrld_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        </div>
+
+        <div class="form-group">
+          <label for="worldInstanceId" class="form-label">World Instance ID</label>
+          <input type="text" id="worldInstanceId" class="form-control" placeholder="Instance ID">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="playersText" class="form-label">Players (one per line as: displayName, id)</label>
+        <textarea 
+          id="playersText" 
+          class="form-control" 
+          rows="6" 
+          placeholder="PlayerName, usr_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx&#10;AnotherPlayer, usr_yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"
+        ></textarea>
+      </div>
+
+      <!-- Actions Section -->
+      <div class="form-group">
+        <label class="form-label">Actions</label>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+          <button id="selectPngForEmbeddingBtn" class="btn btn-secondary">📁 Select PNG for Embedding</button>
+          <button id="embedMetadataBtn" class="btn btn-primary" disabled>💾 Embed Metadata into PNG</button>
+        </div>
+        <div id="selectedPngInfo" class="form-help" style="margin-top: 8px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+  
+  <!-- Toast Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Image Preview Container -->
+  <div id="imagePreviewContainer"></div>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-spinner"></div>
+    <div id="loadingText" class="loading-text">Processing...</div>
+    <div class="loading-subtext">Please wait while we process your images</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,2635 @@
+use reqwest::{multipart, Client};
+
+use std::collections::HashMap;
+
+use std::path::Path;
+
+use std::sync::{Arc, Mutex};
+
+use std::cmp::min;
+
+use tokio::time::{sleep, Duration, Instant};
+
+use tauri::Manager;
+
+
+
+use crate::commands::{Webhook, UploadProgress, FailedUpload, ImageMetadata};
+
+use crate::errors::{AppError, AppResult};
+
+use crate::{database, image_processor, security};
+
+
+
+type ProgressState = Arc<Mutex<HashMap<String, UploadProgress>>>;
+
+
+
+#[derive(Debug, Clone)]
+
+struct ImageGroup {
+
+    images: Vec<String>,
+
+    metadata: Option<ImageMetadata>,
+
+    timestamp: Option<i64>,
+
+    group_id: String,
+
+}
+
+
+
+#[derive(Debug, Clone)]
+
+pub struct RetryConfig {
+
+    max_retries: u32,
+
+    base_delay: Duration,
+
+    max_delay: Duration,
+
+    exponential_base: f64,
+
+}
+
+
+
+impl Default for RetryConfig {
+
+    fn default() -> Self {
+
+        Self {
+
+            max_retries: 3,
+
+            base_delay: Duration::from_millis(1000),
+
+            max_delay: Duration::from_secs(120),
+
+            exponential_base: 2.0,
+
+        }
+
+    }
+
+}
+
+
+
+// Enhanced Discord API client with proper rate limiting
+
+pub struct DiscordClient {
+
+    client: Client,
+
+    rate_limiter: Arc<Mutex<HashMap<String, Instant>>>,
+
+    retry_config: RetryConfig,
+
+}
+
+
+
+impl DiscordClient {
+
+    pub fn new() -> Self {
+
+        Self {
+
+            client: Client::builder()
+
+                .timeout(Duration::from_secs(120))
+
+                .build()
+
+                .unwrap(),
+
+            rate_limiter: Arc::new(Mutex::new(HashMap::new())),
+
+            retry_config: RetryConfig::default(),
+
+        }
+
+    }
+
+    
+
+    pub async fn send_webhook_with_thread_id(
+
+        &self, 
+
+        webhook_url: &str, 
+
+        payload: &UploadPayload, 
+
+        thread_id: Option<&str>
+
+    ) -> AppResult<String> {
+
+        let webhook_id = self.extract_webhook_id(webhook_url);
+
+        self.wait_for_rate_limit(&webhook_id).await;
+
+        
+
+        let mut attempt = 0;
+
+        
+
+        loop {
+
+            let form = payload.build_form()?;
+
+            
+
+            // Build URL with required query parameters
+
+            let mut url_parts = vec![];
+
+            
+
+            // Always add wait=true to get response data
+
+            url_parts.push("wait=true".to_string());
+
+            
+
+            // Add thread_id as query parameter if provided
+
+            if let Some(tid) = thread_id {
+
+                url_parts.push(format!("thread_id={}", tid));
+
+                log::info!("🔗 Adding thread_id to URL query: {}", tid);
+
+            }
+
+            
+
+            let final_url = if webhook_url.contains('?') {
+
+                format!("{}&{}", webhook_url, url_parts.join("&"))
+
+            } else {
+
+                format!("{}?{}", webhook_url, url_parts.join("&"))
+
+            };
+
+            
+
+            log::debug!("Final webhook URL: {}", final_url);
+
+            
+
+            let response = self.client
+
+                .post(&final_url)
+
+                .multipart(form)
+
+                .send()
+
+                .await?;
+
+                
+
+            let status = response.status();
+
+            
+
+            // Update rate limit state based on response headers
+
+            self.update_rate_limit(&webhook_id, &response).await;
+
+            
+
+            if status.is_success() {
+
+                let response_text = response.text().await?;
+
+                log::debug!("Discord webhook response (first 300 chars): {}", 
+
+                    &response_text[..std::cmp::min(300, response_text.len())]);
+
+                return Ok(response_text);
+
+            }
+
+            
+
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+
+            let error = AppError::UploadFailed { 
+
+                reason: format!("Discord API error {}: {}", status, error_text) 
+
+            };
+
+            
+
+            // Check if we should retry
+
+            attempt += 1;
+
+            if should_retry_error(status.as_u16()) && attempt <= self.retry_config.max_retries {
+
+                let delay = if status == 429 {
+
+                    self.extract_retry_after(&error_text)
+
+                        .unwrap_or_else(|| self.calculate_backoff_delay(attempt))
+
+                } else {
+
+                    self.calculate_backoff_delay(attempt)
+
+                };
+
+                
+
+                log::warn!("Upload attempt {} failed, retrying in {:?}: {}", attempt, delay, error);
+
+                sleep(delay).await;
+
+                continue;
+
+            }
+
+            
+
+            return Err(error);
+
+        }
+
+    }
+
+    
+
+    // Keep the old method for backward compatibility, but it now calls the new one
+
+    pub async fn send_webhook(&self, webhook_url: &str, payload: &UploadPayload) -> AppResult<String> {
+
+        self.send_webhook_with_thread_id(webhook_url, payload, None).await
+
+    }
+
+    
+
+    fn extract_webhook_id(&self, url: &str) -> String {
+
+        url.split('/').nth_back(1).unwrap_or("default").to_string()
+
+    }
+
+    
+
+    async fn wait_for_rate_limit(&self, webhook_id: &str) {
+
+        let wait_time = {
+
+            let rate_limiter = self.rate_limiter.lock().unwrap();
+
+            
+
+            if let Some(&last_request) = rate_limiter.get(webhook_id) {
+
+                let elapsed = last_request.elapsed();
+
+                const MIN_DELAY: Duration = Duration::from_millis(1000); // Discord rate limit
+
+                
+
+                if elapsed < MIN_DELAY {
+
+                    Some(MIN_DELAY - elapsed)
+
+                } else {
+
+                    None
+
+                }
+
+            } else {
+
+                None
+
+            }
+
+        }; // MutexGuard is dropped here
+
+        
+
+        if let Some(wait_time) = wait_time {
+
+            sleep(wait_time).await;
+
+        }
+
+    }
+
+    
+
+    async fn update_rate_limit(&self, webhook_id: &str, _response: &reqwest::Response) {
+
+        let mut rate_limiter = self.rate_limiter.lock().unwrap();
+
+        rate_limiter.insert(webhook_id.to_string(), Instant::now());
+
+    }
+
+    
+
+    fn calculate_backoff_delay(&self, attempt: u32) -> Duration {
+
+        let delay_ms = self.retry_config.base_delay.as_millis() as f64 
+
+            * self.retry_config.exponential_base.powi(attempt as i32 - 1);
+
+        
+
+        let delay = Duration::from_millis(delay_ms as u64);
+
+        min(delay, self.retry_config.max_delay)
+
+    }
+
+    
+
+    fn extract_retry_after(&self, error_text: &str) -> Option<Duration> {
+
+        // Try to parse retry-after from Discord error response
+
+        if let Some(start) = error_text.find("retry_after") {
+
+            if let Some(end) = error_text[start..].find(',') {
+
+                let retry_section = &error_text[start..start + end];
+
+                if let Some(colon_pos) = retry_section.find(':') {
+
+                    let value_str = &retry_section[colon_pos + 1..].trim();
+
+                    if let Ok(seconds) = value_str.parse::<f64>() {
+
+                        return Some(Duration::from_secs_f64(seconds));
+
+                    }
+
+                }
+
+            }
+
+        }
+
+        None
+
+    }
+
+}
+
+
+
+// Helper struct to hold upload payload data
+
+#[derive(Debug, Clone)]
+
+pub struct UploadPayload {
+
+    files: Vec<(String, Vec<u8>, String, String)>, // (filename, data, mime_type, field_name)
+
+    text_fields: HashMap<String, String>,
+
+}
+
+
+
+impl UploadPayload {
+
+    fn new() -> Self {
+
+        Self {
+
+            files: Vec::new(),
+
+            text_fields: HashMap::new(),
+
+        }
+
+    }
+
+    
+
+    fn add_text_field(&mut self, key: String, value: String) {
+
+        self.text_fields.insert(key, value);
+
+    }
+
+    
+
+    async fn add_file(&mut self, file_path: &str, field_name: String) -> AppResult<()> {
+
+        let file_contents = tokio::fs::read(file_path).await?;
+
+        let filename = Path::new(file_path)
+
+            .file_name()
+
+            .unwrap_or_default()
+
+            .to_string_lossy()
+
+            .to_string();
+
+        
+
+        // Detect MIME type based on file extension
+
+        let mime_type = match Path::new(file_path).extension().and_then(|e| e.to_str()) {
+
+            Some("png") => "image/png",
+
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+
+            Some("webp") => "image/webp",
+
+            Some("gif") => "image/gif",
+
+            _ => "image/png", // Default fallback
+
+        };
+
+        
+
+        self.files.push((filename, file_contents, mime_type.to_string(), field_name));
+
+        Ok(())
+
+    }
+
+    
+
+    fn build_form(&self) -> AppResult<multipart::Form> {
+
+        let mut form = multipart::Form::new();
+
+        
+
+        // Add text fields
+
+        for (key, value) in &self.text_fields {
+
+            form = form.text(key.clone(), value.clone());
+
+        }
+
+        
+
+        // Add files
+
+        for (filename, data, mime_type, field_name) in &self.files {
+
+            let part = multipart::Part::bytes(data.clone())
+
+                .file_name(filename.clone())
+
+                .mime_str(mime_type)?;
+
+            
+
+            form = form.part(field_name.clone(), part);
+
+        }
+
+        
+
+        Ok(form)
+
+    }
+
+}
+
+
+
+fn should_retry_error(status_code: u16) -> bool {
+
+    matches!(status_code, 429 | 500 | 502 | 503 | 504)
+
+}
+
+
+
+pub async fn process_upload_queue(
+
+    webhook: Webhook,
+
+    file_paths: Vec<String>,
+
+    group_by_metadata: bool,
+
+    max_images_per_message: u8,
+
+    is_forum_channel: bool,
+
+    include_player_names: bool,
+
+    progress_state: ProgressState,
+
+    session_id: String,
+
+    app_handle: tauri::AppHandle,
+
+) {
+
+    let client = DiscordClient::new();
+
+    
+
+    // ENHANCED: Initial cancellation check
+
+    if is_session_cancelled(&progress_state, &session_id) {
+
+        log::info!("Session {} was cancelled before processing started", session_id);
+
+        mark_session_cancelled(&progress_state, &session_id);
+
+        return;
+
+    }
+
+    
+
+    // Validate all files before starting
+
+    let mut valid_files = Vec::new();
+
+    for (i, file_path) in file_paths.iter().enumerate() {
+
+        // ENHANCED: Check cancellation every few files during validation
+
+        if i % 5 == 0 && is_session_cancelled(&progress_state, &session_id) {
+
+            log::info!("Session {} cancelled during file validation at file {}", session_id, i);
+
+            mark_session_cancelled(&progress_state, &session_id);
+
+            return;
+
+        }
+
+        
+
+        if let Err(e) = security::InputValidator::validate_image_file(file_path) {
+
+            log::error!("File validation failed for {}: {}", file_path, e);
+
+            update_progress_failure(&progress_state, &session_id, file_path.clone(), e.to_string(), false);
+
+        } else {
+
+            valid_files.push(file_path.clone());
+
+        }
+
+    }
+
+    
+
+    if valid_files.is_empty() {
+
+        log::warn!("No valid files to upload for session {}", session_id);
+
+        // Mark session as completed even with no valid files
+
+        {
+
+            let mut progress = progress_state.lock().unwrap();
+
+            if let Some(session_progress) = progress.get_mut(&session_id) {
+
+                session_progress.session_status = "completed".to_string();
+
+                session_progress.estimated_time_remaining = Some(0);
+
+            }
+
+        }
+
+        app_handle.emit_all("upload-completed", &session_id).ok();
+
+        return;
+
+    }
+
+    
+
+    // ENHANCED: Check cancellation before grouping
+
+    if is_session_cancelled(&progress_state, &session_id) {
+
+        log::info!("Session {} cancelled before grouping images", session_id);
+
+        mark_session_cancelled(&progress_state, &session_id);
+
+        return;
+
+    }
+
+    
+
+    // Group images if requested
+
+    let groups = if group_by_metadata {
+
+        group_images_by_metadata(valid_files).await
+
+    } else {
+
+        create_individual_groups_with_metadata(valid_files).await
+
+    };
+
+
+
+    let start_time = Instant::now();
+
+    let mut total_processed = 0;
+
+    let total_groups = groups.len();
+
+
+
+    log::info!("Processing {} groups for session {}", total_groups, session_id);
+
+
+
+    // Process each group
+
+    for (group_index, group) in groups.into_iter().enumerate() {
+
+        // ENHANCED: Check cancellation before each group
+
+        if is_session_cancelled(&progress_state, &session_id) {
+
+            log::info!("Session {} cancelled during group {} processing", session_id, group_index + 1);
+
+            mark_session_cancelled(&progress_state, &session_id);
+
+            return;
+
+        }
+
+        
+
+        log::info!("Processing group {} of {} (ID: {}, {} images)", 
+
+            group_index + 1, total_groups, group.group_id, group.images.len());
+
+        
+
+        let group_success = process_image_group_with_failure_handling(
+
+            &client,
+
+            &webhook,
+
+            group,
+
+            max_images_per_message,
+
+            is_forum_channel,
+
+            include_player_names,
+
+            &progress_state,
+
+            &session_id,
+
+            &app_handle,
+
+            group_index == 0, // is_first_group
+
+        ).await;
+
+        
+
+        if is_session_cancelled(&progress_state, &session_id) {
+
+            log::info!("Session {} cancelled after group {} processing", session_id, group_index + 1);
+
+            mark_session_cancelled(&progress_state, &session_id);
+
+            return;
+
+        }
+
+        
+
+        if !group_success {
+
+            log::error!("Group {} failed - stopping remaining groups", group_index + 1);
+
+            
+
+            // Mark session as failed and stop processing
+
+            {
+
+                let mut progress = progress_state.lock().unwrap();
+
+                if let Some(session_progress) = progress.get_mut(&session_id) {
+
+                    session_progress.session_status = "failed".to_string();
+
+                    session_progress.estimated_time_remaining = Some(0);
+
+                }
+
+            }
+
+            
+
+            app_handle.emit_all("upload-failed", &session_id).ok();
+
+            return;
+
+        }
+
+        
+
+        total_processed += 1;
+
+        
+
+        // Update estimated time remaining
+
+        update_time_estimate(&progress_state, &session_id, start_time, total_processed, total_groups);
+
+        
+
+        // Small delay between groups to be nice to Discord
+
+        sleep(Duration::from_millis(500)).await;
+
+    }
+
+
+
+    if is_session_cancelled(&progress_state, &session_id) {
+
+        log::info!("Session {} was cancelled before completion", session_id);
+
+        mark_session_cancelled(&progress_state, &session_id);
+
+        return;
+
+    }
+
+
+
+    // Mark session as completed and emit completion event
+
+    {
+
+        let mut progress = progress_state.lock().unwrap();
+
+        if let Some(session_progress) = progress.get_mut(&session_id) {
+
+            session_progress.session_status = "completed".to_string();
+
+            session_progress.estimated_time_remaining = Some(0);
+
+            
+
+            log::info!("Session {} completed: {}/{} successful, {} failed", 
+
+                session_id, 
+
+                session_progress.successful_uploads.len(),
+
+                session_progress.total_images,
+
+                session_progress.failed_uploads.len()
+
+            );
+
+        }
+
+    }
+
+    
+
+    // Update database session status
+
+    if let Ok(stats) = database::get_upload_session_stats(&session_id).await {
+
+        if let Some((_total, completed, successful, failed)) = stats {
+
+            database::update_upload_session_progress(&session_id, completed, successful, failed).await.ok();
+
+        }
+
+    }
+
+
+
+    app_handle.emit_all("upload-completed", &session_id).ok();
+
+}
+
+
+
+async fn group_images_by_metadata(file_paths: Vec<String>) -> Vec<ImageGroup> {
+
+    let mut groups: HashMap<String, ImageGroup> = HashMap::new();
+
+    
+
+    for file_path in file_paths {
+
+        log::debug!("Extracting metadata for: {}", file_path);
+
+        let metadata = image_processor::extract_metadata(&file_path).await.ok().flatten();
+
+        let timestamp = image_processor::get_timestamp_from_filename(&file_path);
+
+        
+
+        if let Some(ref meta) = metadata {
+
+            log::info!("Extracted metadata for {}: world={}, players={}", 
+
+                file_path, 
+
+                meta.world.as_ref().map(|w| &w.name).unwrap_or(&"None".to_string()),
+
+                meta.players.len()
+
+            );
+
+        } else {
+
+            log::info!("No metadata found for: {}", file_path);
+
+        }
+
+        
+
+        let group_key = if let Some(ref meta) = metadata {
+
+            create_metadata_key(meta, timestamp)
+
+        } else {
+
+            // Group unknown metadata by timestamp window (5 minutes)
+
+            if let Some(ts) = timestamp {
+
+                format!("unknown_{}", ts / 300) // 5-minute windows
+
+            } else {
+
+                format!("unknown_{}", file_path) // Individual
+
+            }
+
+        };
+
+        
+
+        groups.entry(group_key.clone())
+
+            .or_insert_with(|| ImageGroup {
+
+                images: Vec::new(),
+
+                metadata: metadata.clone(),
+
+                timestamp,
+
+                group_id: group_key.clone(),
+
+            })
+
+            .images
+
+            .push(file_path);
+
+    }
+
+    
+
+    // Sort groups by timestamp to maintain chronological order
+
+    let mut group_list: Vec<_> = groups.into_values().collect();
+
+    group_list.sort_by_key(|group| group.timestamp.unwrap_or(0));
+
+    
+
+    group_list
+
+}
+
+
+
+async fn create_individual_groups_with_metadata(file_paths: Vec<String>) -> Vec<ImageGroup> {
+
+    let mut groups = Vec::new();
+
+    
+
+    for (i, file_path) in file_paths.into_iter().enumerate() {
+
+        log::debug!("Extracting metadata for individual image: {}", file_path);
+
+        let metadata = image_processor::extract_metadata(&file_path).await.ok().flatten();
+
+        let timestamp = image_processor::get_timestamp_from_filename(&file_path);
+
+        
+
+        if let Some(ref meta) = metadata {
+
+            log::info!("Extracted metadata for individual image {}: world={}, players={}", 
+
+                file_path, 
+
+                meta.world.as_ref().map(|w| &w.name).unwrap_or(&"None".to_string()),
+
+                meta.players.len()
+
+            );
+
+        } else {
+
+            log::info!("No metadata found for individual image: {}", file_path);
+
+        }
+
+        
+
+        groups.push(ImageGroup {
+
+            images: vec![file_path.clone()],
+
+            metadata,
+
+            timestamp,
+
+            group_id: format!("individual_{}_{}", i, 
+
+                Path::new(&file_path).file_name()
+
+                    .unwrap_or_default()
+
+                    .to_string_lossy()
+
+            ),
+
+        });
+
+    }
+
+    
+
+    // Sort by timestamp to maintain chronological order
+
+    groups.sort_by_key(|group| group.timestamp.unwrap_or(0));
+
+    
+
+    log::info!("Created {} individual groups with metadata", groups.len());
+
+    groups
+
+}
+
+
+
+fn create_metadata_key(metadata: &ImageMetadata, timestamp: Option<i64>) -> String {
+
+    let world_id = metadata.world
+
+        .as_ref()
+
+        .map(|w| w.id.clone())
+
+        .unwrap_or_else(|| "unknown".to_string());
+
+    
+
+    let mut player_ids: Vec<String> = metadata.players
+
+        .iter()
+
+        .map(|p| p.id.clone())
+
+        .collect();
+
+    player_ids.sort(); // Ensure consistent ordering
+
+    
+
+    let time_window = timestamp.unwrap_or(0) / 300; // 5-minute windows
+
+    
+
+    format!("{}_{}_t{}", world_id, player_ids.join(","), time_window)
+
+}
+
+
+
+async fn process_image_group_with_failure_handling(
+
+    client: &DiscordClient,
+
+    webhook: &Webhook,
+
+    group: ImageGroup,
+
+    max_images_per_message: u8,
+
+    is_forum_channel: bool,
+
+    include_player_names: bool,
+
+    progress_state: &ProgressState,
+
+    session_id: &str,
+
+    app_handle: &tauri::AppHandle,
+
+    is_first_group: bool,
+
+) -> bool {
+
+    log::info!("🚀 Starting group upload (ID: {}, {} images)", group.group_id, group.images.len());
+
+    
+
+    if is_session_cancelled(progress_state, session_id) {
+
+        log::info!("❌ Session {} cancelled before group {} upload", session_id, group.group_id);
+
+        return false;
+
+    }
+
+    
+
+    // For forum channels, be extra careful about chunk sizes
+
+    let effective_max_images = if is_forum_channel && max_images_per_message > 10 {
+
+        log::warn!("⚠️ Forum channel detected with max_images > 10, reducing to 10 to prevent issues");
+
+        10
+
+    } else {
+
+        max_images_per_message
+
+    };
+
+    
+
+    let chunks: Vec<Vec<String>> = group.images
+
+        .chunks(effective_max_images as usize)
+
+        .map(|chunk| chunk.to_vec())
+
+        .collect();
+
+    
+
+    if is_forum_channel {
+
+        log::info!("📋 Forum channel upload: {} chunks of max {} images each", 
+
+            chunks.len(), effective_max_images);
+
+        
+
+        if chunks.len() > 1 {
+
+            log::info!("⚠️ Multiple chunks detected for forum channel - thread_id extraction is CRITICAL");
+
+        }
+
+    }
+
+    
+
+    let mut first_message = true;
+
+    let mut thread_id: Option<String> = None;
+
+    
+
+    // Process chunks and stop on first failure OR cancellation
+
+    for (chunk_index, chunk) in chunks.iter().enumerate() {
+
+        if is_session_cancelled(progress_state, session_id) {
+
+            log::info!("❌ Session {} cancelled during chunk {} of group {}", session_id, chunk_index + 1, group.group_id);
+
+            return false;
+
+        }
+
+        
+
+        log::info!("📤 Uploading chunk {} of {} in group {} ({} images)", 
+
+            chunk_index + 1, chunks.len(), group.group_id, chunk.len());
+
+        
+
+        let text_fields = create_discord_payload(
+
+            &group.metadata,
+
+            group.timestamp,
+
+            first_message,
+
+            chunk_index,
+
+            is_forum_channel && is_first_group, // Only first group creates new thread
+
+            thread_id.as_deref(),
+
+            include_player_names,
+
+        );
+
+        
+
+        // Enhanced payload validation for forum channels
+
+        if is_forum_channel && chunk_index > 0 && thread_id.is_none() {
+
+            log::error!("🔴 FATAL: Forum continuation chunk missing thread_id!");
+
+            log::error!("   This will definitely cause Discord API error 400 code 220001");
+
+            log::error!("   Failing group early to prevent API call");
+
+            
+
+            // Mark all remaining files as failed
+
+            for remaining_chunk in chunks.iter().skip(chunk_index) {
+
+                for file_path in remaining_chunk {
+
+                    update_progress_group_failure(progress_state, session_id, file_path.clone(), 
+
+                        "Forum continuation missing thread_id (thread_id extraction failed)".to_string(), true, group.group_id.clone());
+
+                }
+
+            }
+
+            return false;
+
+        }
+
+        
+
+        // Update progress to show current files being uploaded/compressed
+
+        for (file_index, file_path) in chunk.iter().enumerate() {
+
+            if is_session_cancelled(progress_state, session_id) {
+
+                log::info!("❌ Session {} cancelled while updating progress", session_id);
+
+                return false;
+
+            }
+
+            
+
+            // Show initial progress for this file
+
+            let file_progress = (file_index as f32 / chunk.len() as f32) * 100.0;
+
+            update_progress_current_with_phase(progress_state, session_id, file_path.clone(), "Preparing", file_progress);
+
+        }
+
+        
+
+        // Set main current image for the chunk
+
+        if let Some(first_file) = chunk.first() {
+
+            update_progress_current(progress_state, session_id, first_file.clone());
+
+        }
+
+        
+
+        // CRITICAL FIX: Pass thread_id to URL, not form data
+
+        match upload_image_chunk_with_thread_id(
+
+            client, 
+
+            webhook, 
+
+            chunk.clone(), 
+
+            text_fields, 
+
+            thread_id.as_deref(), // Pass thread_id for URL query parameter
+
+            progress_state,
+
+            session_id,
+
+            app_handle,
+
+        ).await {
+
+            Ok(response_data) => {
+
+                if is_session_cancelled(progress_state, session_id) {
+
+                    log::info!("❌ Session {} cancelled after successful chunk upload", session_id);
+
+                    return false;
+
+                }
+
+                
+
+                // For forum channels, extract thread_id from first response
+
+                if is_forum_channel && first_message && thread_id.is_none() {
+
+                    log::info!("🔍 Attempting thread_id extraction from first forum message response...");
+
+                    
+
+                    if let Some(extracted_thread_id) = extract_thread_id(&response_data) {
+
+                        thread_id = Some(extracted_thread_id.clone());
+
+                        log::info!("✅ SUCCESS: Forum post created with thread_id: {}", extracted_thread_id);
+
+                    } else {
+
+                        log::error!("❌ CRITICAL FAILURE: Failed to extract thread_id from forum response!");
+
+                        log::error!("   Response length: {} bytes", response_data.len());
+
+                        log::error!("   This will cause subsequent chunks to fail with error 220001");
+
+                        
+
+                        // If we can't get the thread_id and have more chunks, fail the group immediately
+
+                        if chunks.len() > 1 {
+
+                            log::error!("🔴 Multiple chunks detected but no thread_id - failing group immediately");
+
+                            
+
+                            // Mark all remaining files as failed
+
+                            let remaining_files: Vec<String> = chunks
+
+                                .iter()
+
+                                .skip(chunk_index + 1)
+
+                                .flatten()
+
+                                .cloned()
+
+                                .collect();
+
+                            
+
+                            for file_path in &remaining_files {
+
+                                update_progress_group_failure(progress_state, session_id, file_path.clone(), 
+
+                                    "Forum channel thread_id extraction failed - response missing thread info".to_string(), true, group.group_id.clone());
+
+                            }
+
+                            
+
+                            return false;
+
+                        } else {
+
+                            log::info!("ℹ️ Only one chunk, continuing despite thread_id extraction failure");
+
+                        }
+
+                    }
+
+                }
+
+                
+
+                // Record successful uploads in database and update progress
+
+                for file_path in chunk {
+
+                    // Record in database
+
+                    let file_name = Path::new(file_path).file_name()
+
+                        .unwrap_or_default().to_string_lossy().to_string();
+
+                    
+
+                    let file_hash = image_processor::get_file_hash(file_path).await.ok();
+
+                    let file_size = security::FileSystemGuard::get_file_size(file_path).ok();
+
+                    
+
+                    database::record_upload(
+
+                        file_path.clone(),
+
+                        file_name,
+
+                        file_hash,
+
+                        file_size,
+
+                        webhook.id,
+
+                        "success",
+
+                        None
+
+                    ).await.ok();
+
+                    
+
+                    update_progress_success(progress_state, session_id, file_path.clone());
+
+                }
+
+                
+
+                log::info!("✅ Successfully uploaded chunk {} of group {} ({} images)", 
+
+                    chunk_index + 1, group.group_id, chunk.len());
+
+            }
+
+            Err(e) => {
+
+                log::error!("❌ CHUNK FAILED in group {}: {}", group.group_id, e);
+
+                
+
+                // Enhanced error logging for forum channels
+
+                if is_forum_channel {
+
+                    if e.to_string().contains("thread_name or thread_id") {
+
+                        log::error!("🔴 FORUM CHANNEL ERROR 220001: Missing thread_name or thread_id");
+
+                        log::error!("   Chunk index: {}", chunk_index);
+
+                        log::error!("   Is first message: {}", first_message);
+
+                        log::error!("   Thread ID available: {}", thread_id.is_some());
+
+                        
+
+                        if chunk_index == 0 {
+
+                            log::error!("   ❌ First message failed - likely webhook URL or thread_name issue");
+
+                        } else {
+
+                            log::error!("   ❌ Continuation message failed - thread_id should be in URL now");
+
+                        }
+
+                        
+
+                        log::error!("   💡 Check that wait=true and thread_id are in URL query parameters");
+
+                    }
+
+                }
+
+                
+
+                // Mark ALL remaining images in the group as failed (group failure)
+
+                let remaining_files: Vec<String> = chunks
+
+                    .iter()
+
+                    .skip(chunk_index)
+
+                    .flatten()
+
+                    .cloned()
+
+                    .collect();
+
+                
+
+                for file_path in &remaining_files {
+
+                    // Record failed upload in database
+
+                    let file_name = Path::new(file_path).file_name()
+
+                        .unwrap_or_default().to_string_lossy().to_string();
+
+                    
+
+                    database::record_upload(
+
+                        file_path.clone(),
+
+                        file_name,
+
+                        None,
+
+                        None,
+
+                        webhook.id,
+
+                        "failed",
+
+                        Some(format!("Group failure: {}", e))
+
+                    ).await.ok();
+
+                    
+
+                    // Mark as group failure (retryable)
+
+                    update_progress_group_failure(progress_state, session_id, file_path.clone(), 
+
+                        format!("Forum channel group upload failed: {}", e), true, group.group_id.clone());
+
+                }
+
+                
+
+                // Emit progress update for failed group
+
+                app_handle.emit_all("upload-progress", session_id).ok();
+
+                
+
+                return false;
+
+            }
+
+        }
+
+        
+
+        first_message = false;
+
+        
+
+        // Emit progress update
+
+        app_handle.emit_all("upload-progress", session_id).ok();
+
+        
+
+        // Rate limiting delay between chunks (longer for forum channels)
+
+        if is_forum_channel {
+
+            sleep(Duration::from_millis(2000)).await; // 2s for forum channels
+
+        } else {
+
+            sleep(Duration::from_millis(1000)).await; // 1s for regular channels
+
+        }
+
+    }
+
+    
+
+    if is_forum_channel {
+
+        log::info!("🎉 Forum group {} completed successfully ({} images in {} chunks)", 
+
+            group.group_id, group.images.len(), chunks.len());
+
+    } else {
+
+        log::info!("✅ Group {} completed successfully ({} images)", group.group_id, group.images.len());
+
+    }
+
+    true // Group succeeded
+
+}
+
+
+
+// Updated create_discord_payload
+
+fn create_discord_payload(
+
+    metadata: &Option<ImageMetadata>,
+
+    timestamp: Option<i64>,
+
+    is_first_message: bool,
+
+    chunk_index: usize,
+
+    is_forum_post: bool,
+
+    _thread_id: Option<&str>,
+
+    include_player_names: bool,
+
+) -> HashMap<String, String> {
+
+    let mut payload = HashMap::new();
+
+    
+
+    if is_first_message {
+
+        // Always create message content, regardless of metadata
+
+        let content = if let Some(meta) = metadata {
+
+            create_message_content(meta, timestamp, include_player_names)
+
+        } else {
+
+            // Fallback content when no metadata is available
+
+            if let Some(ts) = timestamp {
+
+                format!("📸 VRChat Photo taken at <t:{}:f>", ts)
+
+            } else {
+
+                "📸 VRChat Photo".to_string()
+
+            }
+
+        };
+
+        
+
+        payload.insert("content".to_string(), content);
+
+        
+
+        // ALWAYS set thread_name for forum posts (initial message)
+
+        if is_forum_post {
+
+            let thread_name = if let Some(meta) = metadata {
+
+                create_thread_title(meta)
+
+            } else {
+
+                "📸 VRChat Photos".to_string()
+
+            };
+
+            log::info!("📝 Setting thread_name for forum post: '{}'", thread_name);
+
+            payload.insert("thread_name".to_string(), thread_name);
+
+        }
+
+    } else if chunk_index > 0 {
+
+        // Continuation message
+
+        payload.insert("content".to_string(), format!("📸 [continues... part {}]", chunk_index + 1));
+
+        
+
+        if is_forum_post {
+
+            log::info!("🔗 Forum continuation - thread_id will be added to URL query parameters");
+
+        }
+
+    }
+
+    
+
+    log::debug!("Created Discord payload (form data): {:?}", payload);
+
+    payload
+
+}
+
+
+
+fn create_message_content(metadata: &ImageMetadata, timestamp: Option<i64>, include_player_names: bool) -> String {
+
+    let mut content = String::new();
+
+    
+
+    if let Some(world) = &metadata.world {
+
+        let vrchat_link = format!("https://vrchat.com/home/launch?worldId={}", world.id);
+
+        let vrcx_link = format!("https://vrcx.azurewebsites.net/world/{}", world.id);
+
+        
+
+        content.push_str(&format!(
+
+            "📸 Photo taken at **{}** ([VRChat](<{}>), [VRCX](<{}>))",
+
+            world.name, vrchat_link, vrcx_link
+
+        ));
+
+        
+
+        // ADD THE include_player_names CHECK HERE:
+
+        if include_player_names && !metadata.players.is_empty() {
+
+            let player_names: Vec<String> = metadata.players
+
+                .iter()
+
+                .map(|p| format!("**{}**", p.display_name))
+
+                .collect();
+
+            content.push_str(&format!(" with {}", player_names.join(", ")));
+
+        }
+
+        
+
+        if let Some(ts) = timestamp {
+
+            content.push_str(&format!(" at <t:{}:f>", ts));
+
+        }
+
+    } else {
+
+        content.push_str("📸 VRChat Photo");
+
+        if let Some(ts) = timestamp {
+
+            content.push_str(&format!(" taken at <t:{}:f>", ts));
+
+        }
+
+    }
+
+    
+
+    content
+
+}
+
+
+
+fn create_thread_title(metadata: &ImageMetadata) -> String {
+
+    if let Some(world) = &metadata.world {
+
+        let title = format!("📸 Photos from {}", world.name);
+
+        
+
+        // Discord thread title limit is 100 characters
+
+        if title.len() > 100 {
+
+            format!("{}...", &title[..97])
+
+        } else {
+
+            title
+
+        }
+
+    } else {
+
+        "📸 VRChat Photos".to_string()
+
+    }
+
+}
+
+
+
+// Updated upload functions to pass thread_id to URL
+
+async fn try_upload_chunk_with_thread_id(
+
+    client: &DiscordClient,
+
+    webhook: &Webhook,
+
+    file_paths: &[String],
+
+    text_fields: &HashMap<String, String>,
+
+    thread_id: Option<&str>,
+
+    progress_state: &ProgressState,
+
+    session_id: &str,
+
+) -> AppResult<String> {
+
+    // Check cancellation before building payload
+
+    if is_session_cancelled(progress_state, session_id) {
+
+        return Err(AppError::Internal("Upload cancelled before payload creation".to_string()));
+
+    }
+
+    
+
+    let mut payload = UploadPayload::new();
+
+    
+
+    // Add text fields (no thread_id here!)
+
+    for (key, value) in text_fields {
+
+        payload.add_text_field(key.clone(), value.clone());
+
+    }
+
+    
+
+    // Add image files with cancellation checks
+
+    for (i, file_path) in file_paths.iter().enumerate() {
+
+        // Check cancellation before each file
+
+        if is_session_cancelled(progress_state, session_id) {
+
+            return Err(AppError::Internal(format!("Upload cancelled while adding file {} of {}", i + 1, file_paths.len())));
+
+        }
+
+        
+
+        payload.add_file(file_path, format!("files[{}]", i)).await?;
+
+    }
+
+    
+
+    // Final cancellation check before HTTP request
+
+    if is_session_cancelled(progress_state, session_id) {
+
+        return Err(AppError::Internal("Upload cancelled before HTTP request".to_string()));
+
+    }
+
+    
+
+    // Use the new method that handles thread_id in URL
+
+    client.send_webhook_with_thread_id(&webhook.url, &payload, thread_id).await
+
+}
+
+
+
+async fn upload_image_chunk_with_thread_id(
+
+    client: &DiscordClient,
+
+    webhook: &Webhook,
+
+    file_paths: Vec<String>,
+
+    text_fields: HashMap<String, String>,
+
+    thread_id: Option<&str>,
+
+    progress_state: &ProgressState,
+
+    session_id: &str,
+
+    app_handle: &tauri::AppHandle,
+
+) -> AppResult<String> {
+
+    log::info!("Starting upload of {} files", file_paths.len());
+
+    
+
+    // Check cancellation before upload attempt
+
+    if is_session_cancelled(progress_state, session_id) {
+
+        return Err(AppError::Internal("Upload cancelled before starting".to_string()));
+
+    }
+
+    
+
+    // Update progress to show upload phase
+
+    if let Some(first_file) = file_paths.first() {
+
+        update_progress_current_with_phase(progress_state, session_id, first_file.clone(), "Uploading", 0.0);
+
+        app_handle.emit_all("upload-progress", session_id).ok();
+
+    }
+
+    
+
+    // Try normal upload first
+
+    let result = try_upload_chunk_with_thread_id(client, webhook, &file_paths, &text_fields, thread_id, progress_state, session_id).await;
+
+    
+
+    match result {
+
+        Ok(response) => {
+
+            log::info!("Upload successful without compression");
+
+            Ok(response)
+
+        },
+
+        Err(e) => {
+
+            // Check cancellation before trying compression
+
+            if is_session_cancelled(progress_state, session_id) {
+
+                return Err(AppError::Internal("Upload cancelled".to_string()));
+
+            }
+
+            
+
+            // Check if it was a 413 error (Payload Too Large)
+
+            if e.to_string().contains("413") || e.to_string().contains("Payload Too Large") {
+
+                log::info!("Payload too large ({}), switching to compression mode for {} files", 
+
+                    e.to_string().lines().next().unwrap_or("unknown error"), 
+
+                    file_paths.len());
+
+                upload_compressed_chunk_with_thread_id(client, webhook, file_paths, text_fields, thread_id, progress_state, session_id, app_handle).await
+
+            } else {
+
+                Err(e)
+
+            }
+
+        }
+
+    }
+
+}
+
+
+
+async fn upload_compressed_chunk_with_thread_id(
+
+    client: &DiscordClient,
+
+    webhook: &Webhook,
+
+    file_paths: Vec<String>,
+
+    text_fields: HashMap<String, String>,
+
+    thread_id: Option<&str>,
+
+    progress_state: &ProgressState,
+
+    session_id: &str,
+
+    app_handle: &tauri::AppHandle,
+
+) -> AppResult<String> {
+
+    let mut compressed_paths = Vec::new();
+
+    let mut cleanup_paths = Vec::new();
+
+    
+
+    // Compress all images with progress updates and cancellation checks
+
+    for (i, file_path) in file_paths.iter().enumerate() {
+
+        // Check cancellation before each compression
+
+        if is_session_cancelled(progress_state, session_id) {
+
+            log::info!("❌ Session {} cancelled during compression at file {}", session_id, i + 1);
+
+            // Clean up any compressed files we've created so far
+
+            for path in &cleanup_paths {
+
+                tokio::fs::remove_file(path).await.ok();
+
+            }
+
+            return Err(AppError::Internal("Upload cancelled during compression".to_string()));
+
+        }
+
+        
+
+        // Update progress to show compression phase
+
+        let compression_progress = (i as f32 / file_paths.len() as f32) * 50.0; // Compression takes ~50% of chunk time
+
+        let filename = Path::new(file_path).file_name().unwrap_or_default().to_string_lossy();
+
+        
+
+        // Update UI progress and emit to frontend
+
+        update_progress_current_with_phase(progress_state, session_id, file_path.clone(), "Compressing", compression_progress);
+
+        app_handle.emit_all("upload-progress", session_id).ok();
+
+        
+
+        log::info!("Compressing image {} of {} ({}%): {}", 
+
+            i + 1, file_paths.len(), compression_progress as u32, filename);
+
+        
+
+        match image_processor::compress_image(file_path, 85).await {
+
+            Ok(compressed_path) => {
+
+                compressed_paths.push(compressed_path.clone());
+
+                cleanup_paths.push(compressed_path.clone()); // Track for cleanup
+
+                log::debug!("Successfully compressed: {} -> {}", file_path, compressed_path);
+
+            }
+
+            Err(e) => {
+
+                log::warn!("Failed to compress {}: {}, using original", file_path, e);
+
+                compressed_paths.push(file_path.clone()); // Use original
+
+            }
+
+        }
+
+    }
+
+    
+
+    // Final cancellation check before upload
+
+    if is_session_cancelled(progress_state, session_id) {
+
+        log::info!("❌ Session {} cancelled after compression, before upload", session_id);
+
+        // Clean up compressed files
+
+        for path in &cleanup_paths {
+
+            tokio::fs::remove_file(path).await.ok();
+
+        }
+
+        return Err(AppError::Internal("Upload cancelled after compression".to_string()));
+
+    }
+
+    
+
+    // Update progress to show upload phase
+
+    if let Some(first_file) = file_paths.first() {
+
+        update_progress_current_with_phase(progress_state, session_id, first_file.clone(), "Uploading", 50.0);
+
+        app_handle.emit_all("upload-progress", session_id).ok();
+
+    }
+
+    
+
+    log::info!("Compression phase completed, starting upload of {} files", compressed_paths.len());
+
+    
+
+    // Try uploading compressed files (remaining 50% of progress)
+
+    let result = try_upload_chunk_with_thread_id(client, webhook, &compressed_paths, &text_fields, thread_id, progress_state, session_id).await;
+
+    
+
+    // Clean up compressed files
+
+    for path in &cleanup_paths {
+
+        if !file_paths.contains(path) {
+
+            if let Err(e) = tokio::fs::remove_file(path).await {
+
+                log::warn!("Failed to cleanup compressed file {}: {}", path, e);
+
+            } else {
+
+                log::debug!("Cleaned up compressed file: {}", path);
+
+            }
+
+        }
+
+    }
+
+    
+
+    result
+
+}
+
+
+
+pub async fn retry_single_upload(
+
+    webhook: Webhook,
+
+    file_path: String,
+
+    progress_state: ProgressState,
+
+    session_id: String,
+
+    app_handle: tauri::AppHandle,
+
+) {
+
+    let client = DiscordClient::new();
+
+    
+
+    // Validate file before retry
+
+    if let Err(e) = security::InputValidator::validate_image_file(&file_path) {
+
+        update_progress_failure(&progress_state, &session_id, file_path, e.to_string(), false);
+
+        return;
+
+    }
+
+    
+
+    // Update progress to show retry attempt
+
+    update_progress_current(&progress_state, &session_id, file_path.clone());
+
+    
+
+    let metadata = image_processor::extract_metadata(&file_path).await.ok().flatten();
+
+    let timestamp = image_processor::get_timestamp_from_filename(&file_path);
+
+    
+
+    let text_fields = create_discord_payload(&metadata, timestamp, true, 0, webhook.is_forum, None, true);
+
+    
+
+    // For retries, don't use thread_id since we're creating a new post
+
+    // Create a dummy progress state for retry (not used for cancellation in retries)
+
+    let dummy_progress_state = Arc::new(Mutex::new(HashMap::new()));
+
+    let dummy_session_id = "retry";
+
+    
+
+    match upload_image_chunk_with_thread_id(&client, &webhook, vec![file_path.clone()], text_fields, None, &dummy_progress_state, dummy_session_id, &app_handle).await {
+
+        Ok(_) => {
+
+            // Record successful retry in database
+
+            let file_name = Path::new(&file_path).file_name()
+
+                .unwrap_or_default().to_string_lossy().to_string();
+
+            
+
+            let file_hash = image_processor::get_file_hash(&file_path).await.ok();
+
+            let file_size = security::FileSystemGuard::get_file_size(&file_path).ok();
+
+            
+
+            database::record_upload(
+
+                file_path.clone(),
+
+                file_name,
+
+                file_hash,
+
+                file_size,
+
+                webhook.id,
+
+                "success",
+
+                None
+
+            ).await.ok();
+
+            
+
+            update_progress_success(&progress_state, &session_id, file_path.clone());
+
+            log::info!("Successfully retried upload for {}", file_path);
+
+        }
+
+        Err(e) => {
+
+            let is_retryable = e.is_retryable();
+
+            
+
+            // Record failed retry in database
+
+            let file_name = Path::new(&file_path).file_name()
+
+                .unwrap_or_default().to_string_lossy().to_string();
+
+            
+
+            database::record_upload(
+
+                file_path.clone(),
+
+                file_name,
+
+                None,
+
+                None,
+
+                webhook.id,
+
+                "failed",
+
+                Some(format!("Retry failed: {}", e))
+
+            ).await.ok();
+
+            
+
+            update_progress_failure(&progress_state, &session_id, file_path.clone(), e.to_string(), is_retryable);
+
+            log::error!("Retry failed: {}", e);
+
+        }
+
+    }
+
+    
+
+    app_handle.emit_all("upload-progress", &session_id).ok();
+
+}
+
+
+
+fn extract_thread_id(response_data: &str) -> Option<String> {
+
+    log::info!("🔍 Attempting to extract thread_id from Discord response");
+
+    log::debug!("Response data length: {} bytes", response_data.len());
+
+    
+
+    if response_data.is_empty() {
+
+        log::error!("❌ Empty response body - this suggests wait=true was not used!");
+
+        return None;
+
+    }
+
+    
+
+    log::debug!("First 200 chars of response: {}", 
+
+        &response_data[..std::cmp::min(200, response_data.len())]);
+
+    
+
+    // Parse Discord response to extract thread/channel ID for forum posts
+
+    match serde_json::from_str::<serde_json::Value>(response_data) {
+
+        Ok(json) => {
+
+            log::debug!("✅ Successfully parsed Discord response as JSON");
+
+            
+
+            // For forum posts, Discord returns the thread/channel ID in the 'id' field
+
+            if let Some(id_value) = json.get("id") {
+
+                if let Some(id_str) = id_value.as_str() {
+
+                    log::info!("🎉 Successfully extracted thread_id from 'id' field: {}", id_str);
+
+                    return Some(id_str.to_string());
+
+                }
+
+            }
+
+            
+
+            // Alternative: sometimes it might be in 'channel_id'
+
+            if let Some(channel_id) = json.get("channel_id").and_then(|v| v.as_str()) {
+
+                log::info!("🎉 Extracted thread_id from 'channel_id' field: {}", channel_id);
+
+                return Some(channel_id.to_string());
+
+            }
+
+            
+
+            // Log the full structure for debugging
+
+            log::debug!("Discord response structure: {}", 
+
+                serde_json::to_string_pretty(&json).unwrap_or_else(|_| "Invalid JSON".to_string()));
+
+            
+
+            // Check if there are any other ID-like fields
+
+            if let Some(obj) = json.as_object() {
+
+                for (key, value) in obj {
+
+                    if key.contains("id") && value.is_string() {
+
+                        log::debug!("Found ID field '{}': {}", key, value);
+
+                    }
+
+                }
+
+            }
+
+            
+
+            log::error!("❌ No thread_id found in any expected fields (id, channel_id)");
+
+        }
+
+        Err(e) => {
+
+            log::error!("❌ Failed to parse Discord response as JSON: {}", e);
+
+            log::debug!("Raw response that failed to parse: {}", response_data);
+
+        }
+
+    }
+
+    
+
+    log::error!("❌ Could not extract thread_id from Discord response");
+
+    None
+
+}
+
+
+
+// Progress update helper functions with compression awareness
+
+fn update_progress_current(progress_state: &ProgressState, session_id: &str, file_path: String) {
+
+    let mut progress = progress_state.lock().unwrap();
+
+    if let Some(session_progress) = progress.get_mut(session_id) {
+
+        session_progress.current_image = Some(file_path.clone());
+
+        session_progress.current_progress = 0.0;
+
+        log::debug!("Progress: Currently uploading {}", file_path);
+
+    }
+
+}
+
+
+
+fn update_progress_current_with_phase(progress_state: &ProgressState, session_id: &str, file_path: String, phase: &str, progress: f32) {
+
+    let mut progress_state_lock = progress_state.lock().unwrap();
+
+    if let Some(session_progress) = progress_state_lock.get_mut(session_id) {
+
+        session_progress.current_image = Some(format!("{} - {}", phase, 
+
+            Path::new(&file_path).file_name().unwrap_or_default().to_string_lossy()));
+
+        session_progress.current_progress = progress;
+
+        log::debug!("Progress: {} {} ({}%)", phase, file_path, progress as u32);
+
+    }
+
+}
+
+
+
+fn update_progress_success(progress_state: &ProgressState, session_id: &str, file_path: String) {
+
+    let mut progress = progress_state.lock().unwrap();
+
+    if let Some(session_progress) = progress.get_mut(session_id) {
+
+        session_progress.completed += 1;
+
+        session_progress.successful_uploads.push(file_path.clone());
+
+        session_progress.current_progress = 100.0;
+
+        
+
+        // Remove from failed uploads if it was previously failed
+
+        session_progress.failed_uploads.retain(|f| f.file_path != file_path);
+
+        
+
+        log::info!("Progress: Successfully uploaded {} ({}/{})", 
+
+            file_path, session_progress.completed, session_progress.total_images);
+
+    }
+
+}
+
+
+
+fn update_progress_failure(progress_state: &ProgressState, session_id: &str, file_path: String, error: String, is_retryable: bool) {
+
+    let mut progress = progress_state.lock().unwrap();
+
+    if let Some(session_progress) = progress.get_mut(session_id) {
+
+        session_progress.completed += 1;
+
+        
+
+        // Check if this file already failed, increment retry count
+
+        if let Some(existing_failure) = session_progress.failed_uploads.iter_mut().find(|f| f.file_path == file_path) {
+
+            existing_failure.retry_count += 1;
+
+            existing_failure.error = error.clone();
+
+            existing_failure.is_retryable = is_retryable;
+
+        } else {
+
+            session_progress.failed_uploads.push(FailedUpload {
+
+                file_path: file_path.clone(),
+
+                error: error.clone(),
+
+                retry_count: 0,
+
+                is_retryable,
+
+            });
+
+        }
+
+        
+
+        log::warn!("Progress: Failed to upload {} - {} ({}/{})", 
+
+            file_path, error, session_progress.completed, session_progress.total_images);
+
+    }
+
+}
+
+
+
+fn update_progress_group_failure(
+
+    progress_state: &ProgressState, 
+
+    session_id: &str, 
+
+    file_path: String, 
+
+    error: String, 
+
+    is_retryable: bool,
+
+    group_id: String
+
+) {
+
+    let mut progress = progress_state.lock().unwrap();
+
+    if let Some(session_progress) = progress.get_mut(session_id) {
+
+        session_progress.completed += 1;
+
+        
+
+        session_progress.failed_uploads.push(FailedUpload {
+
+            file_path: file_path.clone(),
+
+            error: format!("[Group: {}] {}", group_id, error),
+
+            retry_count: 0,
+
+            is_retryable,
+
+        });
+
+        
+
+        log::warn!("Progress: Group failure for {} in group {} - {}", 
+
+            file_path, group_id, error);
+
+    }
+
+}
+
+
+
+fn update_time_estimate(progress_state: &ProgressState, session_id: &str, start_time: Instant, completed: usize, total: usize) {
+
+    if completed == 0 { return; }
+
+    
+
+    let elapsed = start_time.elapsed().as_secs_f64();
+
+    let rate = completed as f64 / elapsed;
+
+    let remaining = total - completed;
+
+    
+
+    // Account for potential compression overhead (estimate 30% longer if compression is likely needed)
+
+    let compression_factor = 1.3; // Assume 30% overhead for compression if needed
+
+    let estimated_seconds = if rate > 0.0 {
+
+        ((remaining as f64 / rate) * compression_factor) as u64
+
+    } else {
+
+        0
+
+    };
+
+    
+
+    let mut progress = progress_state.lock().unwrap();
+
+    if let Some(session_progress) = progress.get_mut(session_id) {
+
+        session_progress.estimated_time_remaining = Some(estimated_seconds);
+
+        
+
+        // Log time estimate for debugging
+
+        if estimated_seconds > 0 {
+
+            let minutes = estimated_seconds / 60;
+
+            let seconds = estimated_seconds % 60;
+
+            log::debug!("ETA updated: {}m {}s (rate: {:.2} images/sec, remaining: {})", 
+
+                minutes, seconds, rate, remaining);
+
+        }
+
+    }
+
+}
+
+
+
+// Helper functions for cancellation support - ENHANCED VERSION
+
+fn is_session_cancelled(progress_state: &ProgressState, session_id: &str) -> bool {
+
+    let progress = progress_state.lock().unwrap();
+
+    if let Some(session_progress) = progress.get(session_id) {
+
+        let is_cancelled = session_progress.session_status == "cancelled";
+
+        if is_cancelled {
+
+            log::info!("Session {} is marked as cancelled", session_id);
+
+        }
+
+        is_cancelled
+
+    } else {
+
+        log::warn!("Session {} not found in progress state", session_id);
+
+        true // Treat missing session as cancelled
+
+    }
+
+}
+
+
+
+fn mark_session_cancelled(progress_state: &ProgressState, session_id: &str) {
+
+    let mut progress = progress_state.lock().unwrap();
+
+    if let Some(session_progress) = progress.get_mut(session_id) {
+
+        session_progress.session_status = "cancelled".to_string();
+
+        session_progress.estimated_time_remaining = Some(0);
+
+        log::info!("Marked session {} as cancelled with {} completed uploads", 
+
+            session_id, session_progress.completed);
+
+    }
+
+}

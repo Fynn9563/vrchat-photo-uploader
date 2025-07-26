@@ -1,0 +1,87 @@
+[package]
+name = "vrchat-photo-uploader"
+version = "2.0.0"
+description = "A powerful tool for uploading VRChat photos to Discord"
+authors = ["Fynn9563"]
+repository = "https://github.com/fynn9563/vrchat-photo-uploader"
+license = "MIT"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+tauri-build = { version = "1.5.1", features = [] }
+
+[dependencies]
+tauri = { version = "1.8.3", features = [
+    # File system operations
+    "fs-remove-file",
+    "fs-read-dir",
+    "fs-copy-file", 
+    "fs-create-dir",
+    "fs-exists",
+    "fs-read-file",
+    "fs-write-file",
+    
+    # Dialog operations
+    "dialog-message",
+    "dialog-save",
+    "dialog-open",
+    
+    # Path and OS operations
+    "path-all",
+    "os-all",
+    
+    # System integration
+    "global-shortcut-all",
+    "shell-open",
+    "system-tray",
+    "notification-all",
+    
+    # Development
+    "devtools"
+] }
+
+# Dependencies for manual single-instance implementation
+sysinfo = "0.30"
+ctrlc = "3.4"
+
+serde = { version = "1.0.196", features = ["derive"] }
+serde_json = "1.0.113"
+tokio = { version = "1.36.0", features = ["full"] }
+reqwest = { version = "0.11.24", features = ["json", "multipart", "stream"] }
+sqlx = { version = "0.7.3", features = [
+    "runtime-tokio-rustls",
+    "sqlite",
+    "macros",
+    "chrono",
+    "uuid"
+] }
+thiserror = "1.0.56"
+log = "0.4.20"
+env_logger = "0.11.1"
+chrono = { version = "0.4.33", features = ["serde"] }
+uuid = { version = "1.7.0", features = ["v4", "serde"] }
+dirs = "5.0.1"
+regex = "1.10.2"
+anyhow = "1.0"
+image = { version = "0.24.8", features = ["png", "jpeg", "webp", "gif"] }
+flate2 = "1.0.28"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+
+[profile.dev]
+incremental = true
+debug = true
+
+[[bin]]
+name = "vrchat-photo-uploader"
+path = "src/main.rs"
