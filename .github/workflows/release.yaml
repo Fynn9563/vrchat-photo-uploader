@@ -215,7 +215,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Pull latest version changes
+        run: |
+          git pull origin ${{ github.ref_name }}
+          echo "✅ Pulled latest changes with version updates"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -317,6 +323,35 @@ jobs:
           # Install dependencies with cross-platform fallback strategy
           pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
           echo "Dependencies installed successfully"
+
+      - name: Verify version consistency
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          CARGO_VERSION=$(grep '^version = ' src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').package.version")
+          
+          echo "📋 Version Check:"
+          echo "  package.json: $PACKAGE_VERSION"
+          echo "  Cargo.toml: $CARGO_VERSION"
+          echo "  tauri.conf.json: $TAURI_VERSION"
+          echo "  Expected: ${{ needs.get-version.outputs.new_version }}"
+          
+          if [[ "$PACKAGE_VERSION" != "${{ needs.get-version.outputs.new_version }}" ]]; then
+            echo "❌ Version mismatch in package.json"
+            exit 1
+          fi
+          
+          if [[ "$CARGO_VERSION" != "${{ needs.get-version.outputs.new_version }}" ]]; then
+            echo "❌ Version mismatch in Cargo.toml"
+            exit 1
+          fi
+          
+          if [[ "$TAURI_VERSION" != "${{ needs.get-version.outputs.new_version }}" ]]; then
+            echo "❌ Version mismatch in tauri.conf.json"
+            exit 1
+          fi
+          
+          echo "✅ All versions are consistent!"
 
       - name: Build frontend
         run: pnpm run build
