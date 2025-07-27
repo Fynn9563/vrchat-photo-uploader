@@ -170,6 +170,12 @@ jobs:
           cd src-tauri
           sed -i 's/^version = ".*"/version = "${{ needs.get-version.outputs.new_version }}"/' Cargo.toml
 
+      - name: Update Cargo.lock
+        run: |
+          cd src-tauri
+          cargo check
+          echo "✅ Updated Cargo.lock"
+
       - name: Update tauri.conf.json version
         run: |
           pnpm dlx json -I -f src-tauri/tauri.conf.json -e "this.package.version='${{ needs.get-version.outputs.new_version }}'"
@@ -178,7 +184,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add package.json pnpm-lock.yaml src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          git add package.json pnpm-lock.yaml src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
           
           # Check if there are changes to commit
           if git diff --staged --quiet; then
@@ -186,6 +192,7 @@ jobs:
           else
             git commit -m "chore: bump version to ${{ needs.get-version.outputs.new_version }}"
             git push origin HEAD:${{ github.ref_name }}
+            echo "✅ Version changes committed and pushed"
           fi
 
   build-and-release:
