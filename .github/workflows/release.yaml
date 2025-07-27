@@ -54,18 +54,16 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
+        shell: bash
         run: |
-          echo "PNPM version: $(pnpm --version)"
-          echo "Node version: $(node --version)"
+          echo "PNPM version:"
+          pnpm --version
+          echo "Node version:"
+          node --version
           
-          # Install dependencies with fallback strategy
-          if pnpm install --frozen-lockfile 2>/dev/null; then
-            echo "✅ Installed with frozen lockfile"
-          else
-            echo "⚠️ Frozen lockfile incompatible, installing without frozen lockfile..."
-            pnpm install --no-frozen-lockfile
-            echo "✅ Dependencies installed successfully"
-          fi
+          # Install dependencies with cross-platform fallback strategy
+          pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
+          echo "Dependencies installed successfully"
 
       - name: Determine version increment
         id: version
@@ -154,17 +152,14 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
+        shell: bash
         run: |
-          echo "PNPM version: $(pnpm --version)"
+          echo "PNPM version:"
+          pnpm --version
           
-          # Install dependencies with fallback strategy
-          if pnpm install --frozen-lockfile 2>/dev/null; then
-            echo "✅ Installed with frozen lockfile"
-          else
-            echo "⚠️ Frozen lockfile incompatible, installing without frozen lockfile..."
-            pnpm install --no-frozen-lockfile
-            echo "✅ Dependencies installed successfully"
-          fi
+          # Install dependencies with cross-platform fallback strategy
+          pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
+          echo "Dependencies installed successfully"
 
       - name: Update package.json version
         run: |
@@ -313,18 +308,15 @@ jobs:
           echo "🎉 System dependencies installation completed!"
 
       - name: Install frontend dependencies
+        shell: bash
         run: |
-          echo "PNPM version: $(pnpm --version)"
+          echo "PNPM version:"
+          pnpm --version
           echo "Platform: ${{ matrix.platform }}"
           
-          # Install dependencies with fallback strategy
-          if pnpm install --frozen-lockfile 2>/dev/null; then
-            echo "✅ Installed with frozen lockfile"
-          else
-            echo "⚠️ Frozen lockfile incompatible, installing without frozen lockfile..."
-            pnpm install --no-frozen-lockfile
-            echo "✅ Dependencies installed successfully"
-          fi
+          # Install dependencies with cross-platform fallback strategy
+          pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
+          echo "Dependencies installed successfully"
 
       - name: Build frontend
         run: pnpm run build
