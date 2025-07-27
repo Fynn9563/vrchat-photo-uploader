@@ -171,30 +171,6 @@ pub async fn retry_failed_group(
 }
 
 #[tauri::command]
-pub async fn resolve_temp_file_paths(temp_filenames: Vec<String>) -> Result<Vec<String>, String> {
-    let mut resolved_paths = Vec::new();
-    
-    for filename in temp_filenames {
-        // Check if it's already a full path
-        if std::path::Path::new(&filename).is_absolute() {
-            resolved_paths.push(filename);
-        } else {
-            // Resolve as temp file
-            let temp_dir = std::env::temp_dir();
-            let full_path = temp_dir.join(&filename);
-            
-            if full_path.exists() {
-                resolved_paths.push(full_path.to_string_lossy().to_string());
-            } else {
-                return Err(format!("Temp file not found: {}", filename));
-            }
-        }
-    }
-    
-    Ok(resolved_paths)
-}
-
-#[tauri::command]
 pub async fn add_webhook(name: String, url: String) -> Result<(), String> {
     // Validate inputs
     InputValidator::validate_webhook_name(&name)?;

@@ -203,28 +203,6 @@ where
     }
 }
 
-// Database operation with error handling
-pub async fn safe_database_operation<F, Fut, T>(
-    operation_name: &str,
-    context: &str,
-    operation: F
-) -> Option<T>
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<T, sqlx::Error>>,
-{
-    match operation().await {
-        Ok(result) => {
-            log::debug!("Database operation '{}' successful: {}", operation_name, context);
-            Some(result)
-        }
-        Err(e) => {
-            log::warn!("Database operation '{}' failed for {} (non-critical): {}", operation_name, context, e);
-            None
-        }
-    }
-}
-
 // UI event emission with error handling
 pub fn safe_emit_event(
     app_handle: &tauri::AppHandle,

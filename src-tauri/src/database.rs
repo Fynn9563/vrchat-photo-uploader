@@ -359,33 +359,6 @@ pub async fn record_upload(
     Ok(())
 }
 
-pub async fn record_uploads_batch(uploads: Vec<(String, String, Option<String>, Option<u64>, i64, String, Option<String>)>) -> AppResult<()> {
-    let pool = get_pool()?;
-    let mut tx = pool.begin().await?;
-    
-    for (file_path, file_name, file_hash, file_size, webhook_id, status, error_message) in uploads {
-        sqlx::query(
-            r#"
-            INSERT INTO upload_history 
-            (file_path, file_name, file_hash, file_size, webhook_id, upload_status, error_message) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            "#
-        )
-        .bind(file_path)
-        .bind(file_name)
-        .bind(file_hash)
-        .bind(file_size.map(|s| s as i64))
-        .bind(webhook_id)
-        .bind(status)
-        .bind(error_message)
-        .execute(&mut *tx)
-        .await?;
-    }
-    
-    tx.commit().await?;
-    Ok(())
-}
-
 // Upload session management
 pub async fn create_upload_session(session_id: String, webhook_id: i64, total_files: i32) -> AppResult<()> {
     let pool = get_pool()?;

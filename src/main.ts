@@ -58,6 +58,14 @@ interface AppConfig {
 class AppState {
   public webhooks: Webhook[] = [];
   private uploadQueue: QueueItem[] = [];
+
+  getSelectedItemIds(): string[] {
+    return this.uploadQueue.filter(item => item.selected).map(item => item.id);
+  }
+
+  getSelectedItems(): QueueItem[] {
+    return this.uploadQueue.filter(item => item.selected);
+  }
   private currentUploadSession: string | null = null;
   public selectedWebhookId: number | null = null;
   private progressPollingInterval: number | null = null;
@@ -83,7 +91,7 @@ class AppState {
     return permission === 'granted';
   }
 
-  private async showDesktopNotification(title: string, message: string, type: 'success' | 'error' | 'info' = 'info') {
+  async showDesktopNotification(title: string, message: string, type: 'success' | 'error' | 'info' = 'info') {
     if (!this.notificationsEnabled) return;
 
     const hasPermission = await this.requestNotificationPermission();
@@ -213,8 +221,6 @@ class AppState {
       const newWebhookId = await invoke('add_webhook', { name, url, is_forum: false });
       await this.loadWebhooks();
       
-      // Auto-select the newly created webhook
-      this.selectedWebhookId = newWebhookId;
       this.updateWebhookSelector(); // This will now show the new webhook as selected
       
       this.showSuccess('Webhook added and selected!');
@@ -1764,11 +1770,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   selectAllBtn?.addEventListener('click', () => state.selectAllItems());
 
   const deselectAllBtn = document.getElementById('deselectAllBtn');
-  deselectAllBtn?.addEventListener('click', () => state.deselectAllItems());
+    const selectedIds = state.getSelectedItemIds();
 
   const removeSelectedBtn = document.getElementById('removeSelectedBtn');
   removeSelectedBtn?.addEventListener('click', () => {
-    const selectedIds = state.uploadQueue.filter(item => item.selected).map(item => item.id);
+    const selectedIds = state.getSelectedItemIds();
     selectedIds.forEach(id => state.removeFromQueue(id));
   });
 
@@ -1875,7 +1881,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Metadata tools
   const viewMetadataBtn = document.getElementById('viewMetadataBtn');
   viewMetadataBtn?.addEventListener('click', async () => {
-    const selectedItems = state.uploadQueue.filter(item => item.selected);
+    const selectedItems = state.getSelectedItems();
     if (selectedItems.length > 0) {
       try {
         console.log('Calling get_image_metadata with:', { filePath: selectedItems[0].filePath });
@@ -1916,21 +1922,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Show loading state
         const originalText = loadPngMetadataBtn.innerHTML;
         loadPngMetadataBtn.innerHTML = '🔄 Loading Metadata...';
-        loadPngMetadataBtn.disabled = true;
+        (loadPngMetadataBtn as HTMLButtonElement).disabled = true;
         
         try {
           await loadPngMetadata(selected);
         } finally {
           // Restore button state
           loadPngMetadataBtn.innerHTML = originalText;
-          loadPngMetadataBtn.disabled = false;
+          (loadPngMetadataBtn as HTMLButtonElement).disabled = false;
         }
       }
     } catch (error) {
       state.showError(`Failed to load PNG: ${error}`);
       // Restore button in case of error
       loadPngMetadataBtn.innerHTML = '📂 Load PNG Metadata';
-      loadPngMetadataBtn.disabled = false;
+      (loadPngMetadataBtn as HTMLButtonElement).disabled = false;
     }
   });
 
@@ -1991,14 +1997,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Show loading state
     const originalText = embedMetadataBtn.innerHTML;
     embedMetadataBtn.innerHTML = '🔄 Embedding Metadata...';
-    embedMetadataBtn.disabled = true;
-    
+    (embedMetadataBtn as HTMLButtonElement).disabled = true;
+
     try {
       await embedMetadataIntoPng();
     } finally {
       // Restore button state
       embedMetadataBtn.innerHTML = originalText;
-      embedMetadataBtn.disabled = false;
+      (embedMetadataBtn as HTMLButtonElement).disabled = false;
     }
   });
 
@@ -2107,7 +2113,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const playersText = (document.getElementById('playersText') as HTMLTextAreaElement).value.trim();
     
     // Parse players
-    const players = [];
+    interface Player {
+      displayName: string;
+      id: string;
+    }
+    const players: Player[] = [];
     if (playersText) {
       const lines = playersText.split('\n');
       for (const line of lines) {
@@ -2142,7 +2152,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const outputPath = await invoke('update_image_metadata', {
         filePath: selectedPngPath,
         metadata: metadata
-      });
+      }) as string;
       
       state.showSuccess(`Metadata embedded successfully! Saved as: ${outputPath.split(/[\\/]/).pop()}`);
       
@@ -2240,7 +2250,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       const config: AppConfig = {
-        last_webhook_id: state.selectedWebhookId,
+        last_webhook_id: state.selectedWebhookId ?? undefined,
         group_by_metadata: groupByMetadata?.checked || true,
         max_images_per_message: parseInt(maxImages?.value || '10'),
         enable_global_shortcuts: enableGlobalShortcuts?.checked || true,

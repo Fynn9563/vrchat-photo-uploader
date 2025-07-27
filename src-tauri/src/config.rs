@@ -147,38 +147,6 @@ pub fn get_temp_directory() -> AppResult<PathBuf> {
     Ok(temp_dir)
 }
 
-// Utility functions for common paths
-pub fn get_default_vrchat_screenshots_path() -> Option<PathBuf> {
-    // Try to find VRChat's default screenshot directory
-    if let Some(pictures_dir) = dirs::picture_dir() {
-        let vrchat_path = pictures_dir.join("VRChat");
-        if vrchat_path.exists() {
-            return Some(vrchat_path);
-        }
-    }
-    
-    // Alternative common locations
-    if let Some(documents_dir) = dirs::document_dir() {
-        let vrchat_path = documents_dir.join("VRChat");
-        if vrchat_path.exists() {
-            return Some(vrchat_path);
-        }
-    }
-    
-    // Check AppData for Windows
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(local_appdata) = dirs::data_local_dir() {
-            let vrchat_path = local_appdata.join("VRChat").join("VRChat");
-            if vrchat_path.exists() {
-                return Some(vrchat_path);
-            }
-        }
-    }
-    
-    None
-}
-
 pub fn validate_config(config: &Config) -> AppResult<()> {
     if config.max_images_per_message == 0 || config.max_images_per_message > 10 {
         return Err(AppError::validation("max_images_per_message", "Must be between 1 and 10"));
@@ -307,24 +275,5 @@ fn cleanup_old_files(directory: &PathBuf, days: i32) -> AppResult<()> {
         }
     }
     
-    Ok(())
-}
-
-// Reset configuration to defaults
-pub fn reset_config() -> AppResult<()> {
-    let config_path = get_config_path()?;
-    
-    // Backup existing config
-    if config_path.exists() {
-        let backup_path = config_path.with_extension("json.reset_backup");
-        fs::copy(&config_path, &backup_path)?;
-        log::info!("Existing config backed up to {}", backup_path.display());
-    }
-    
-    // Save default config
-    let default_config = Config::default();
-    save_config_internal(&default_config)?;
-    
-    log::info!("Configuration reset to defaults");
     Ok(())
 }

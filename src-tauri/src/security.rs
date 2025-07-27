@@ -156,12 +156,4 @@ impl FileSystemGuard {
         Ok(metadata.len())
     }
     
-    pub fn is_image_file(path: &str) -> bool {
-        if let Some(extension) = Path::new(path).extension() {
-            let ext = extension.to_string_lossy().to_lowercase();
-            matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp")
-        } else {
-            false
-        }
-    }
 }

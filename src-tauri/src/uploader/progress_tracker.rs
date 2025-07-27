@@ -184,14 +184,3 @@ pub fn mark_session_failed(progress_state: &ProgressState, session_id: &str) {
         );
     });
 }
-
-/// Get session statistics for logging/reporting
-pub fn get_session_stats(progress_state: &ProgressState, session_id: &str) -> Option<(usize, usize, usize)> {
-    safe_progress_read(progress_state, session_id, "stats read", |progress| {
-        (
-            progress.total_images,
-            progress.successful_uploads.len(),
-            progress.failed_uploads.len()
-        )
-    })
-}

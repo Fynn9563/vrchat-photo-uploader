@@ -123,12 +123,7 @@ impl DiscordClient {
             return Err(error);
         }
     }
-    
-    /// Keep the old method for backward compatibility, but it now calls the new one
-    pub async fn send_webhook(&self, webhook_url: &str, payload: &UploadPayload) -> AppResult<String> {
-        self.send_webhook_with_thread_id(webhook_url, payload, None).await
-    }
-    
+        
     fn extract_webhook_id(&self, url: &str) -> String {
         url.split('/').nth_back(1).unwrap_or("default").to_string()
     }
