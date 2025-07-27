@@ -167,13 +167,20 @@ jobs:
             libappindicator3-dev \
             libsoup2.4-dev
 
+          if ! dpkg -s libwebkit2gtk-4.0-dev >/dev/null 2>&1; then
+            sudo apt-get install -y libwebkit2gtk-4.1-dev
+            sudo ln -sf \
+              /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.1.pc \
+              /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.0.pc
+          fi
+          
           if ! dpkg -s libjavascriptcoregtk-4.0-dev >/dev/null 2>&1; then
             sudo apt-get install -y libjavascriptcoregtk-4.1-dev
             sudo ln -sf \
               /usr/lib/x86_64-linux-gnu/pkgconfig/javascriptcoregtk-4.1.pc \
               /usr/lib/x86_64-linux-gnu/pkgconfig/javascriptcoregtk-4.0.pc
           fi
-          
+
       - name: Install dependencies
         shell: bash
         run: |
