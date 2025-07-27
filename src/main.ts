@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/api/dialog';
 import { readBinaryFile } from '@tauri-apps/api/fs';
+import { getVersion } from '@tauri-apps/api/app';
 
 console.log('VRChat Photo Uploader starting...');
 
@@ -1417,6 +1418,7 @@ let originalCreationTime: number | null = null;
 // Initialize everything when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('DOM loaded, initializing app...');
+  await loadAppVersion();
 
   // Load initial data
   await state.loadWebhooks();
@@ -1875,6 +1877,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const aboutBtn = document.getElementById('aboutBtn');
   aboutBtn?.addEventListener('click', () => {
+    loadAppVersion();
     ModalManager.openModal('aboutModal');
   });
 
@@ -2007,6 +2010,23 @@ document.addEventListener('DOMContentLoaded', async () => {
       (embedMetadataBtn as HTMLButtonElement).disabled = false;
     }
   });
+
+  async function loadAppVersion() {
+    try {
+      const version = await getVersion();
+      const aboutVersionElement = document.getElementById('aboutVersion');
+      if (aboutVersionElement) {
+        aboutVersionElement.textContent = version;
+        console.log('✅ App version loaded:', version);
+      }
+    } catch (error) {
+      console.error('❌ Failed to load app version:', error);
+      const aboutVersionElement = document.getElementById('aboutVersion');
+      if (aboutVersionElement) {
+        aboutVersionElement.textContent = 'Unknown';
+      }
+    }
+  }
 
   async function loadPngMetadata(filePath: string) {
     try {
