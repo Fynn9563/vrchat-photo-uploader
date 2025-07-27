@@ -1,0 +1,282 @@
+name: 'Pre-release & Nightly'
+
+on:
+  push:
+    branches:
+      - dev
+      - beta
+      - development
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+  schedule:
+    # Run nightly builds at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'beta'
+        type: choice
+        options:
+        - beta
+        - nightly
+        - alpha
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.changes.outputs.has_changes }}
+      commit_count: ${{ steps.changes.outputs.commit_count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes since last nightly
+        id: changes
+        run: |
+          # Check if this is a scheduled build
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            # Get the last nightly tag
+            LAST_NIGHTLY=$(git tag -l "nightly-*" | sort -V | tail -n 1)
+            
+            if [[ -n "$LAST_NIGHTLY" ]]; then
+              # Count commits since last nightly
+              COMMIT_COUNT=$(git rev-list --count ${LAST_NIGHTLY}..HEAD)
+              
+              if [[ $COMMIT_COUNT -gt 0 ]]; then
+                echo "has_changes=true" >> $GITHUB_OUTPUT
+                echo "commit_count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
+                echo "Found $COMMIT_COUNT new commits since $LAST_NIGHTLY"
+              else
+                echo "has_changes=false" >> $GITHUB_OUTPUT
+                echo "commit_count=0" >> $GITHUB_OUTPUT
+                echo "No changes since last nightly build"
+              fi
+            else
+              echo "has_changes=true" >> $GITHUB_OUTPUT
+              echo "commit_count=unknown" >> $GITHUB_OUTPUT
+              echo "No previous nightly build found"
+            fi
+          else
+            # For manual triggers or branch pushes, always build
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "commit_count=1" >> $GITHUB_OUTPUT
+          fi
+
+  generate-version:
+    needs: check-changes
+    if: needs.check-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build_type: ${{ steps.version.outputs.build_type }}
+      tag_name: ${{ steps.version.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate pre-release version
+        id: version
+        run: |
+          # Get current version from package.json
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          
+          # Determine build type
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            BUILD_TYPE="${{ github.event.inputs.build_type }}"
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            BUILD_TYPE="nightly"
+          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]] || [[ "${{ github.ref }}" == "refs/heads/development" ]]; then
+            BUILD_TYPE="alpha"
+          elif [[ "${{ github.ref }}" == "refs/heads/beta" ]]; then
+            BUILD_TYPE="beta"
+          else
+            BUILD_TYPE="beta"
+          fi
+          
+          # Generate timestamp
+          TIMESTAMP=$(date -u +"%Y%m%d%H%M")
+          SHORT_SHA=${GITHUB_SHA:0:7}
+          
+          # Create pre-release version
+          case $BUILD_TYPE in
+            nightly)
+              PRE_VERSION="${CURRENT_VERSION}-nightly.${TIMESTAMP}.${SHORT_SHA}"
+              TAG_NAME="nightly-${TIMESTAMP}"
+              ;;
+            alpha)
+              PRE_VERSION="${CURRENT_VERSION}-alpha.${TIMESTAMP}.${SHORT_SHA}"
+              TAG_NAME="alpha-${TIMESTAMP}"
+              ;;
+            beta)
+              PRE_VERSION="${CURRENT_VERSION}-beta.${TIMESTAMP}.${SHORT_SHA}"
+              TAG_NAME="beta-${TIMESTAMP}"
+              ;;
+          esac
+          
+          echo "version=$PRE_VERSION" >> $GITHUB_OUTPUT
+          echo "build_type=$BUILD_TYPE" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          
+          echo "Generated version: $PRE_VERSION"
+          echo "Build type: $BUILD_TYPE"
+          echo "Tag name: $TAG_NAME"
+
+  build-prerelease:
+    needs: [check-changes, generate-version]
+    if: needs.check-changes.outputs.has_changes == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'windows-latest'
+            args: '--target x86_64-pc-windows-msvc'
+            target: 'x86_64-pc-windows-msvc'
+          - platform: 'macos-latest'
+            args: '--target x86_64-apple-darwin'
+            target: 'x86_64-apple-darwin'
+          - platform: 'ubuntu-20.04'
+            args: '--target x86_64-unknown-linux-gnu'
+            target: 'x86_64-unknown-linux-gnu'
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install dependencies (Ubuntu only)
+        if: matrix.platform == 'ubuntu-20.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Update version in files
+        run: |
+          VERSION="${{ needs.generate-version.outputs.version }}"
+          
+          # Update package.json
+          npx json -I -f package.json -e "this.version='$VERSION'"
+          
+          # Update Cargo.toml
+          cd src-tauri
+          sed -i 's/^version = ".*"/version = "'$VERSION'"/' Cargo.toml
+          
+          # Update tauri.conf.json
+          cd ..
+          npx json -I -f src-tauri/tauri.conf.json -e "this.package.version='$VERSION'"
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        with:
+          tagName: ${{ needs.generate-version.outputs.tag_name }}
+          releaseName: 'VRChat Photo Uploader ${{ needs.generate-version.outputs.version }} (${{ needs.generate-version.outputs.build_type }})'
+          releaseBody: |
+            ## 🚧 Pre-release Build - ${{ needs.generate-version.outputs.build_type | title }}
+            
+            **Version:** ${{ needs.generate-version.outputs.version }}  
+            **Build Type:** ${{ needs.generate-version.outputs.build_type | title }}  
+            **Commit:** ${{ github.sha }}  
+            **Branch:** ${{ github.ref_name }}  
+            
+            ### ⚠️ Important Notice
+            This is a **${{ needs.generate-version.outputs.build_type }}** build and may contain:
+            - Unfinished features
+            - Known bugs or issues
+            - Breaking changes
+            - Experimental functionality
+            
+            **Not recommended for production use.**
+            
+            ### 📋 Changes Since Last Release
+            ${{ needs.check-changes.outputs.commit_count }} commit(s) included in this build.
+            
+            ### 📥 Installation
+            - **Windows**: Download the `.msi` or `.exe` file
+            - **macOS**: Download the `.dmg` file  
+            - **Linux**: Download the `.AppImage` or `.deb` file
+            
+            ### 🐛 Reporting Issues
+            Found a bug in this pre-release? Please report it in our [Issues](https://github.com/${{ github.repository }}/issues) section.
+            Include the full version number: `${{ needs.generate-version.outputs.version }}`
+            
+            ### 🔄 Auto-generated Release
+            This release was automatically generated from the latest ${{ github.ref_name }} branch.
+          releaseDraft: false
+          prerelease: true
+          args: ${{ matrix.args }}
+
+  cleanup-old-prereleases:
+    needs: [generate-version, build-prerelease]
+    if: needs.generate-version.outputs.build_type == 'nightly'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old nightly releases
+        run: |
+          # Keep only the last 7 nightly releases
+          echo "Cleaning up old nightly releases..."
+          
+          # Get all nightly release tags, sort them, and keep only the newest 7
+          NIGHTLY_TAGS=$(git tag -l "nightly-*" | sort -V)
+          TOTAL_TAGS=$(echo "$NIGHTLY_TAGS" | wc -l)
+          
+          if [[ $TOTAL_TAGS -gt 7 ]]; then
+            TAGS_TO_DELETE=$(echo "$NIGHTLY_TAGS" | head -n $((TOTAL_TAGS - 7)))
+            
+            for tag in $TAGS_TO_DELETE; do
+              echo "Deleting old nightly release: $tag"
+              
+              # Get release ID
+              RELEASE_ID=$(gh release view "$tag" --json id --jq '.id' 2>/dev/null || echo "")
+              
+              if [[ -n "$RELEASE_ID" ]]; then
+                # Delete the release
+                gh release delete "$tag" --yes 2>/dev/null || echo "Failed to delete release $tag"
+              fi
+              
+              # Delete the tag
+              git tag -d "$tag" 2>/dev/null || echo "Failed to delete local tag $tag"
+              git push origin ":refs/tags/$tag" 2>/dev/null || echo "Failed to delete remote tag $tag"
+            done
+          else
+            echo "Only $TOTAL_TAGS nightly releases found, no cleanup needed"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
