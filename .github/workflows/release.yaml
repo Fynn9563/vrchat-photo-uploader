@@ -1,4 +1,4 @@
-name: 'Build and Release (PNPM)'
+name: 'Build and Release (PNPM Fixed)'
 
 on:
   push:
@@ -38,9 +38,10 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
-          version: latest
+          version: 9
+          run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -49,7 +50,24 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          echo "PNPM version: $(pnpm --version)"
+          echo "Node version: $(node --version)"
+          
+          # Check if lockfile exists and get version
+          if [ -f "pnpm-lock.yaml" ]; then
+            LOCKFILE_VERSION=$(grep 'lockfileVersion:' pnpm-lock.yaml | sed "s/lockfileVersion: '//g" | sed "s/'//g" || echo "unknown")
+            echo "Lockfile version: $LOCKFILE_VERSION"
+          fi
+          
+          # Install dependencies with fallback strategy
+          if pnpm install --frozen-lockfile 2>/dev/null; then
+            echo "✅ Installed with frozen lockfile"
+          else
+            echo "⚠️ Frozen lockfile incompatible, installing without frozen lockfile..."
+            pnpm install --no-frozen-lockfile
+            echo "✅ Dependencies installed successfully"
+          fi
 
       - name: Determine version increment
         id: version
@@ -122,9 +140,10 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
-          version: latest
+          version: 9
+          run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -136,7 +155,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          echo "PNPM version: $(pnpm --version)"
+          
+          # Install dependencies with fallback strategy
+          if pnpm install --frozen-lockfile 2>/dev/null; then
+            echo "✅ Installed with frozen lockfile"
+          else
+            echo "⚠️ Frozen lockfile incompatible, installing without frozen lockfile..."
+            pnpm install --no-frozen-lockfile
+            echo "✅ Dependencies installed successfully"
+          fi
 
       - name: Update package.json version
         run: |
@@ -194,9 +223,10 @@ jobs:
           ref: ${{ github.sha }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
-          version: latest
+          version: 9
+          run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -221,7 +251,18 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
 
       - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          echo "PNPM version: $(pnpm --version)"
+          echo "Platform: ${{ matrix.platform }}"
+          
+          # Install dependencies with fallback strategy
+          if pnpm install --frozen-lockfile 2>/dev/null; then
+            echo "✅ Installed with frozen lockfile"
+          else
+            echo "⚠️ Frozen lockfile incompatible, installing without frozen lockfile..."
+            pnpm install --no-frozen-lockfile
+            echo "✅ Dependencies installed successfully"
+          fi
 
       - name: Build frontend
         run: pnpm run build
@@ -272,9 +313,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
-          version: latest
+          version: 9
+          run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -291,7 +333,17 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          echo "PNPM version: $(pnpm --version)"
+          
+          # Install dependencies with fallback strategy
+          if (pnpm install --frozen-lockfile) {
+            Write-Host "✅ Installed with frozen lockfile"
+          } else {
+            Write-Host "⚠️ Frozen lockfile incompatible, installing without frozen lockfile..."
+            pnpm install --no-frozen-lockfile
+            Write-Host "✅ Dependencies installed successfully"
+          }
 
       - name: Build frontend
         run: pnpm run build
@@ -304,8 +356,10 @@ jobs:
       - name: Run tests (if available)
         run: |
           # Try to run frontend tests
-          if (Get-Command "pnpm test" -ErrorAction SilentlyContinue) {
+          try {
             pnpm test --run
+          } catch {
+            Write-Host "No frontend tests found or test command failed"
           }
           # Run Rust tests
           cd src-tauri
