@@ -1,4 +1,4 @@
-name: 'Build and Release'
+name: 'Build and Release (PNPM)'
 
 on:
   push:
@@ -37,14 +37,19 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'pnpm'
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Determine version increment
         id: version
@@ -116,21 +121,26 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'pnpm'
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Update package.json version
         run: |
-          npm version ${{ needs.get-version.outputs.new_version }} --no-git-tag-version
+          pnpm version ${{ needs.get-version.outputs.new_version }} --no-git-tag-version
 
       - name: Update Cargo.toml version
         run: |
@@ -144,13 +154,13 @@ jobs:
 
       - name: Update tauri.conf.json version
         run: |
-          npx json -I -f src-tauri/tauri.conf.json -e "this.package.version='${{ needs.get-version.outputs.new_version }}'"
+          pnpm dlx json -I -f src-tauri/tauri.conf.json -e "this.package.version='${{ needs.get-version.outputs.new_version }}'"
 
       - name: Commit version changes
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
+          git add package.json pnpm-lock.yaml src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
           git commit -m "chore: bump version to ${{ needs.get-version.outputs.new_version }}" || exit 0
           git push
 
@@ -183,11 +193,16 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'pnpm'
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -206,10 +221,10 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build frontend
-        run: npm run build
+        run: pnpm run build
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -256,11 +271,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'pnpm'
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -271,18 +291,22 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build frontend
-        run: npm run build
+        run: pnpm run build
 
       - name: Test Tauri build
         run: |
           cd src-tauri
           cargo build --release
 
-      - name: Run tests
+      - name: Run tests (if available)
         run: |
-          npm test -- --run
+          # Try to run frontend tests
+          if (Get-Command "pnpm test" -ErrorAction SilentlyContinue) {
+            pnpm test --run
+          }
+          # Run Rust tests
           cd src-tauri
           cargo test

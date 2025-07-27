@@ -91,7 +91,7 @@ jobs:
           VERSION="${{ needs.validate-and-prepare.outputs.version }}"
           
           # Update package.json
-          npm version $VERSION --no-git-tag-version
+          pnpm version $VERSION --no-git-tag-version
           
           # Update Cargo.toml
           cd src-tauri
@@ -102,13 +102,13 @@ jobs:
           
           # Update tauri.conf.json
           cd ..
-          npx json -I -f src-tauri/tauri.conf.json -e "this.package.version='$VERSION'"
+          pnpm dlx json -I -f src-tauri/tauri.conf.json -e "this.package.version='$VERSION'"
 
       - name: Commit version changes
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
+          git add package.json pnpm-lock.yaml src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
           git commit -m "chore: manual release v${{ needs.validate-and-prepare.outputs.version }}"
           git push
 
@@ -171,7 +171,7 @@ jobs:
         run: npm ci
 
       - name: Build frontend
-        run: npm run build
+        run: pnpm run build
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
