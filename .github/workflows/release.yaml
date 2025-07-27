@@ -1,4 +1,4 @@
-name: 'Build and Release (Linux Dependencies Fixed)'
+name: 'Build and Release (Simple Fix)'
 
 on:
   push:
@@ -145,9 +145,6 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Install dependencies
         run: |
           echo "PNPM version: $(pnpm --version)"
@@ -170,11 +167,6 @@ jobs:
           cd src-tauri
           sed -i 's/^version = ".*"/version = "${{ needs.get-version.outputs.new_version }}"/' Cargo.toml
 
-      - name: Update Cargo.lock
-        run: |
-          cd src-tauri
-          cargo check
-
       - name: Update tauri.conf.json version
         run: |
           pnpm dlx json -I -f src-tauri/tauri.conf.json -e "this.package.version='${{ needs.get-version.outputs.new_version }}'"
@@ -183,7 +175,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add package.json pnpm-lock.yaml src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
+          git add package.json pnpm-lock.yaml src-tauri/Cargo.toml src-tauri/tauri.conf.json
           git commit -m "chore: bump version to ${{ needs.get-version.outputs.new_version }}" || exit 0
           git push
 
@@ -206,7 +198,7 @@ jobs:
           - platform: 'macos-latest'
             args: '--target x86_64-apple-darwin'
             target: 'x86_64-apple-darwin'
-          - platform: 'ubuntu-22.04'  # Updated to 22.04 for better dependency support
+          - platform: 'ubuntu-22.04'
             args: '--target x86_64-unknown-linux-gnu'
             target: 'x86_64-unknown-linux-gnu'
 
@@ -246,7 +238,7 @@ jobs:
           # Update package list
           sudo apt-get update -qq
           
-          # Install essential build tools
+          # Install essential build tools first
           sudo apt-get install -y \
             build-essential \
             pkg-config \
@@ -264,7 +256,7 @@ jobs:
             librsvg2-dev \
             patchelf
           
-          # Install GLib and related libraries
+          # Install GLib and related libraries (the critical missing piece)
           sudo apt-get install -y \
             libglib2.0-dev \
             libgdk-pixbuf2.0-dev \
@@ -291,14 +283,18 @@ jobs:
             libxi6 \
             libxrender1 \
             libcairo-gobject2 \
-            libdbus-1-dev \
-            librust-atk-sys-dev
+            libdbus-1-dev
           
           # Verify critical packages are installed
           echo "✅ Verifying installations..."
           pkg-config --exists glib-2.0 && echo "✅ glib-2.0 found" || echo "❌ glib-2.0 missing"
           pkg-config --exists gtk+-3.0 && echo "✅ gtk+-3.0 found" || echo "❌ gtk+-3.0 missing"
           pkg-config --exists webkit2gtk-4.0 && echo "✅ webkit2gtk-4.0 found" || echo "❌ webkit2gtk-4.0 missing"
+          
+          # Show PKG_CONFIG_PATH for debugging
+          echo "PKG_CONFIG_PATH: ${PKG_CONFIG_PATH:-not set}"
+          echo "Available glib .pc files:"
+          find /usr/lib /usr/local/lib -name "*glib*.pc" 2>/dev/null | head -10 || echo "None found"
           
           echo "🎉 System dependencies installation completed!"
 
@@ -318,17 +314,6 @@ jobs:
 
       - name: Build frontend
         run: pnpm run build
-
-      - name: Debug environment (Ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          echo "🔍 Environment Debug Information:"
-          echo "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
-          echo "Available .pc files in /usr/lib/pkgconfig:"
-          ls -la /usr/lib/pkgconfig/ | grep -E "(glib|gtk|webkit)" || echo "None found in /usr/lib/pkgconfig"
-          echo "Available .pc files in /usr/lib/x86_64-linux-gnu/pkgconfig:"
-          ls -la /usr/lib/x86_64-linux-gnu/pkgconfig/ | grep -E "(glib|gtk|webkit)" || echo "None found in /usr/lib/x86_64-linux-gnu/pkgconfig"
-          echo "pkg-config version: $(pkg-config --version)"
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
