@@ -1881,29 +1881,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     ModalManager.openModal('aboutModal');
   });
 
-  // Metadata tools
-  const viewMetadataBtn = document.getElementById('viewMetadataBtn');
-  viewMetadataBtn?.addEventListener('click', async () => {
-    const selectedItems = state.getSelectedItems();
-    if (selectedItems.length > 0) {
-      try {
-        console.log('Calling get_image_metadata with:', { filePath: selectedItems[0].filePath });
-        
-        const metadata = await invoke('get_image_metadata', { 
-          filePath: selectedItems[0].filePath
-        });
-        
-        if (metadata) {
-          state.showSuccess(`Metadata found for ${selectedItems[0].filename}`);
-          console.log('Metadata:', metadata);
-        } else {
-          state.showWarning(`No metadata found in ${selectedItems[0].filename}`);
-        }
-      } catch (error) {
-        state.showError(`Failed to read metadata: ${error}`);
-      }
-    }
-  });
+  // Tools
 
   const metadataEditorBtn = document.getElementById('metadataEditorBtn');
   metadataEditorBtn?.addEventListener('click', () => {
