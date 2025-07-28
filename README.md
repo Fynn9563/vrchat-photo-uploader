@@ -5,7 +5,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen)
 
 A powerful desktop application for uploading VRChat photos to Discord with intelligent grouping, automatic metadata extraction, and seamless integration.
-
+ 
 ## ✨ Features
 
 - **🏷️ Automatic Metadata Extraction** - Reads VRChat photo metadata (world, players, timestamps)
