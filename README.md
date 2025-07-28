@@ -1,7 +1,7 @@
 # VRChat Photo Uploader
 
 ![Version](https://img.shields.io/github/v/release/fynn9563/vrchat-photo-uploader)
-![License](https://img.shields.io/github/license/fynn9563/vrchat-photo-uploader)
+![License](https://img.shields.io/github/license/fynn9563/vrchat-photo-uploader?branch=master)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen)
 
 A powerful desktop application for uploading VRChat photos to Discord with intelligent grouping, automatic metadata extraction, and seamless integration.
