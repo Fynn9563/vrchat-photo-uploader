@@ -30,7 +30,7 @@ pub enum AppError {
     #[error("Invalid file type: {path}. Only image files are supported.")]
     InvalidFileType { path: String },
     
-    #[error("File too large: {path}. Maximum size is 25MB.")]
+    #[error("File too large: {path}. Maximum size is 50MB.")]
     FileTooLarge { path: String },
     
     #[error("Metadata parsing error: {0}")]

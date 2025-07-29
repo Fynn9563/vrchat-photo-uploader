@@ -102,8 +102,8 @@ impl InputValidator {
         // Additional image-specific validation
         let metadata = std::fs::metadata(file_path)?;
         
-        // Check file size (max 25MB for Discord)
-        const MAX_FILE_SIZE: u64 = 25 * 1024 * 1024;
+        // Check file size (max 50MB for Discord)
+        const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024;
         if metadata.len() > MAX_FILE_SIZE {
             return Err(AppError::file_too_large(file_path));
         }

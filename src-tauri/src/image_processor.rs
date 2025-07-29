@@ -592,7 +592,7 @@ pub fn get_image_info(file_path: &str) -> AppResult<(u32, u32, u64)> {
 // Function to check if image needs compression based on Discord limits
 pub fn should_compress_image(file_path: &str) -> AppResult<bool> {
     let file_size = FileSystemGuard::get_file_size(file_path)?;
-    const DISCORD_LIMIT: u64 = 25 * 1024 * 1024; // 25MB
+    const DISCORD_LIMIT: u64 = 50 * 1024 * 1024; // 50MB
     const COMPRESSION_THRESHOLD: u64 = 8 * 1024 * 1024; // 8MB
     
     if file_size > DISCORD_LIMIT {
