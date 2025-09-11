@@ -62,7 +62,7 @@ Object.defineProperty(window, 'localStorage', {
 });
 
 // Mock File API
-global.File = class MockFile {
+globalThis.File = class MockFile {
   constructor(
     public bits: BlobPart[],
     public name: string,
@@ -80,7 +80,7 @@ global.File = class MockFile {
 } as any;
 
 // Mock FileReader
-global.FileReader = class MockFileReader extends EventTarget {
+globalThis.FileReader = class MockFileReader extends EventTarget {
   result: string | ArrayBuffer | null = null;
   error: DOMException | null = null;
   readyState = 0;
@@ -104,7 +104,7 @@ global.FileReader = class MockFileReader extends EventTarget {
 } as any;
 
 // Mock drag and drop events
-global.DataTransfer = class MockDataTransfer {
+globalThis.DataTransfer = class MockDataTransfer {
   dropEffect: 'none' | 'copy' | 'link' | 'move' = 'none';
   effectAllowed: 'none' | 'copy' | 'copyLink' | 'copyMove' | 'link' | 'linkMove' | 'move' | 'all' | 'uninitialized' = 'uninitialized';
   files: FileList = [] as any;
