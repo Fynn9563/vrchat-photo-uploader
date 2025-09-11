@@ -36,12 +36,20 @@ runs:
         if sudo apt-get install -y libwebkit2gtk-4.1-dev; then
           echo "✅ Installed libwebkit2gtk-4.1-dev"
           
-          # Create compatibility symlinks for Rust crates expecting 4.0
+          # Create compatibility symlinks for pkg-config
           if [ ! -f /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.0.pc ]; then
             sudo ln -sf \
               /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.1.pc \
               /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.0.pc
             echo "✅ Created webkit2gtk-4.0.pc compatibility link"
+          fi
+          
+          # Create library symlinks for linker
+          if [ ! -f /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.0.so ]; then
+            sudo ln -sf \
+              /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so \
+              /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.0.so
+            echo "✅ Created libwebkit2gtk-4.0.so compatibility link"
           fi
           
         elif sudo apt-get install -y libwebkit2gtk-4.0-dev; then
@@ -66,12 +74,20 @@ runs:
         if sudo apt-get install -y libjavascriptcoregtk-4.1-dev; then
           echo "✅ Installed libjavascriptcoregtk-4.1-dev"
           
-          # Create compatibility symlinks for Rust crates expecting 4.0
+          # Create compatibility symlinks for pkg-config
           if [ ! -f /usr/lib/x86_64-linux-gnu/pkgconfig/javascriptcoregtk-4.0.pc ]; then
             sudo ln -sf \
               /usr/lib/x86_64-linux-gnu/pkgconfig/javascriptcoregtk-4.1.pc \
               /usr/lib/x86_64-linux-gnu/pkgconfig/javascriptcoregtk-4.0.pc
             echo "✅ Created javascriptcoregtk-4.0.pc compatibility link"
+          fi
+          
+          # Create library symlinks for linker  
+          if [ ! -f /usr/lib/x86_64-linux-gnu/libjavascriptcoregtk-4.0.so ]; then
+            sudo ln -sf \
+              /usr/lib/x86_64-linux-gnu/libjavascriptcoregtk-4.1.so \
+              /usr/lib/x86_64-linux-gnu/libjavascriptcoregtk-4.0.so
+            echo "✅ Created libjavascriptcoregtk-4.0.so compatibility link"
           fi
           
         elif sudo apt-get install -y libjavascriptcoregtk-4.0-dev; then

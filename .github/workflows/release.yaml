@@ -374,19 +374,42 @@ jobs:
         run: |
           echo "🔍 Verifying build artifacts and generating checksums..."
           
-          # Find all release files
-          RELEASE_FILES=$(find src-tauri/target -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" \) 2>/dev/null || true)
+          # Find all release files in common Tauri output locations
+          RELEASE_FILES=$(find . -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.app.tar.gz" \) 2>/dev/null || true)
           
+          # Also check specific Tauri bundle locations
           if [ -z "$RELEASE_FILES" ]; then
-            echo "⚠️ No release files found in expected locations"
-            # Try alternative locations
-            RELEASE_FILES=$(find . -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" \) 2>/dev/null || true)
+            echo "🔍 Searching in specific bundle locations..."
+            BUNDLE_LOCATIONS=(
+              "src-tauri/target/release/bundle"
+              "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle"
+              "src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
+              "src-tauri/target/aarch64-apple-darwin/release/bundle"
+              "src-tauri/target/x86_64-apple-darwin/release/bundle"
+            )
+            
+            for location in "${BUNDLE_LOCATIONS[@]}"; do
+              if [ -d "$location" ]; then
+                echo "📁 Checking: $location"
+                FOUND_FILES=$(find "$location" -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" \) 2>/dev/null || true)
+                if [ -n "$FOUND_FILES" ]; then
+                  RELEASE_FILES="$RELEASE_FILES $FOUND_FILES"
+                fi
+              fi
+            done
           fi
           
           if [ -z "$RELEASE_FILES" ]; then
             echo "❌ No release files found anywhere"
+            echo "🔍 Debug: Listing all files in src-tauri/target:"
+            find src-tauri/target -type f -name "*" 2>/dev/null | head -20 || echo "No files found in src-tauri/target"
+            echo "🔍 Debug: Listing current directory contents:"
+            ls -la
             exit 1
           fi
+          
+          # Clean up the RELEASE_FILES variable (remove extra spaces)
+          RELEASE_FILES=$(echo $RELEASE_FILES | tr -s ' ')
           
           # Create checksums directory
           mkdir -p checksums
