@@ -1,11 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{
-    CustomMenuItem, GlobalShortcutManager, Manager, SystemTray, SystemTrayEvent,
-    SystemTrayMenu, SystemTrayMenuItem,
-};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tauri::{
+    CustomMenuItem, GlobalShortcutManager, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu,
+    SystemTrayMenuItem,
+};
 
 mod commands;
 mod config;
@@ -14,8 +14,8 @@ mod errors;
 mod image_processor;
 mod metadata_editor;
 mod security;
-mod uploader;
 mod single_instance;
+mod uploader;
 
 use commands::*;
 
@@ -60,19 +60,32 @@ fn main() {
 
     tauri::Builder::default()
         .system_tray(system_tray)
-        .on_system_tray_event(|app, event| {
-            match event {
-                SystemTrayEvent::LeftClick {
-                    position: _,
-                    size: _,
-                    ..
-                } => {
-                    let window = app.get_window("main").unwrap();
-                    if window.is_visible().unwrap_or(false) {
-                        if let Err(e) = window.hide() {
-                            log::error!("Failed to hide window: {}", e);
+        .on_system_tray_event(|app, event| match event {
+            SystemTrayEvent::LeftClick {
+                position: _,
+                size: _,
+                ..
+            } => {
+                let window = app.get_window("main").unwrap();
+                if window.is_visible().unwrap_or(false) {
+                    if let Err(e) = window.hide() {
+                        log::error!("Failed to hide window: {}", e);
+                    }
+                } else {
+                    if let Err(e) = window.show() {
+                        log::error!("Failed to show window: {}", e);
+                    }
+                    if let Err(e) = window.set_focus() {
+                        log::error!("Failed to focus window: {}", e);
+                    }
+                }
+            }
+            SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
+                "upload_files" => {
+                    if let Some(window) = app.get_window("main") {
+                        if let Err(e) = window.emit("upload-files-request", {}) {
+                            log::error!("Failed to emit file upload event: {}", e);
                         }
-                    } else {
                         if let Err(e) = window.show() {
                             log::error!("Failed to show window: {}", e);
                         }
@@ -81,82 +94,7 @@ fn main() {
                         }
                     }
                 }
-                SystemTrayEvent::MenuItemClick { id, .. } => {
-                    match id.as_str() {
-                        "upload_files" => {
-                            if let Some(window) = app.get_window("main") {
-                                if let Err(e) = window.emit("upload-files-request", {}) {
-                                    log::error!("Failed to emit file upload event: {}", e);
-                                }
-                                if let Err(e) = window.show() {
-                                    log::error!("Failed to show window: {}", e);
-                                }
-                                if let Err(e) = window.set_focus() {
-                                    log::error!("Failed to focus window: {}", e);
-                                }
-                            }
-                        }
-                        "show" => {
-                            let window = app.get_window("main").unwrap();
-                            if let Err(e) = window.show() {
-                                log::error!("Failed to show window: {}", e);
-                            }
-                            if let Err(e) = window.set_focus() {
-                                log::error!("Failed to focus window: {}", e);
-                            }
-                        }
-                        "settings" => {
-                            if let Some(window) = app.get_window("main") {
-                                if let Err(e) = window.emit("show-settings", {}) {
-                                    log::error!("Failed to emit settings event: {}", e);
-                                }
-                                if let Err(e) = window.show() {
-                                    log::error!("Failed to show window: {}", e);
-                                }
-                                if let Err(e) = window.set_focus() {
-                                    log::error!("Failed to focus window: {}", e);
-                                }
-                            }
-                        }
-                        "about" => {
-                            if let Some(window) = app.get_window("main") {
-                                if let Err(e) = window.emit("show-about", {}) {
-                                    log::error!("Failed to emit about event: {}", e);
-                                }
-                                if let Err(e) = window.show() {
-                                    log::error!("Failed to show window: {}", e);
-                                }
-                                if let Err(e) = window.set_focus() {
-                                    log::error!("Failed to focus window: {}", e);
-                                }
-                            }
-                        }
-                        "metadata_editor" => {
-                            if let Some(window) = app.get_window("main") {
-                                if let Err(e) = window.emit("show-metadata-editor", {}) {
-                                    log::error!("Failed to emit metadata editor event: {}", e);
-                                }
-                                if let Err(e) = window.show() {
-                                    log::error!("Failed to show window: {}", e);
-                                }
-                                if let Err(e) = window.set_focus() {
-                                    log::error!("Failed to focus window: {}", e);
-                                }
-                            }
-                        }
-                        "quit" => {
-                            log::info!("Application quit requested from tray");
-                            single_instance::cleanup_lock_file();
-                            app.exit(0);
-                        }
-                        _ => {}
-                    }
-                }
-                SystemTrayEvent::DoubleClick {
-                    position: _,
-                    size: _,
-                    ..
-                } => {
+                "show" => {
                     let window = app.get_window("main").unwrap();
                     if let Err(e) = window.show() {
                         log::error!("Failed to show window: {}", e);
@@ -165,8 +103,66 @@ fn main() {
                         log::error!("Failed to focus window: {}", e);
                     }
                 }
+                "settings" => {
+                    if let Some(window) = app.get_window("main") {
+                        if let Err(e) = window.emit("show-settings", {}) {
+                            log::error!("Failed to emit settings event: {}", e);
+                        }
+                        if let Err(e) = window.show() {
+                            log::error!("Failed to show window: {}", e);
+                        }
+                        if let Err(e) = window.set_focus() {
+                            log::error!("Failed to focus window: {}", e);
+                        }
+                    }
+                }
+                "about" => {
+                    if let Some(window) = app.get_window("main") {
+                        if let Err(e) = window.emit("show-about", {}) {
+                            log::error!("Failed to emit about event: {}", e);
+                        }
+                        if let Err(e) = window.show() {
+                            log::error!("Failed to show window: {}", e);
+                        }
+                        if let Err(e) = window.set_focus() {
+                            log::error!("Failed to focus window: {}", e);
+                        }
+                    }
+                }
+                "metadata_editor" => {
+                    if let Some(window) = app.get_window("main") {
+                        if let Err(e) = window.emit("show-metadata-editor", {}) {
+                            log::error!("Failed to emit metadata editor event: {}", e);
+                        }
+                        if let Err(e) = window.show() {
+                            log::error!("Failed to show window: {}", e);
+                        }
+                        if let Err(e) = window.set_focus() {
+                            log::error!("Failed to focus window: {}", e);
+                        }
+                    }
+                }
+                "quit" => {
+                    log::info!("Application quit requested from tray");
+                    single_instance::cleanup_lock_file();
+                    app.exit(0);
+                }
                 _ => {}
+            },
+            SystemTrayEvent::DoubleClick {
+                position: _,
+                size: _,
+                ..
+            } => {
+                let window = app.get_window("main").unwrap();
+                if let Err(e) = window.show() {
+                    log::error!("Failed to show window: {}", e);
+                }
+                if let Err(e) = window.set_focus() {
+                    log::error!("Failed to focus window: {}", e);
+                }
             }
+            _ => {}
         })
         .manage(ProgressState::new(Mutex::new(HashMap::new())))
         .invoke_handler(tauri::generate_handler![
@@ -195,7 +191,7 @@ fn main() {
             log::info!("Setting up application...");
             // Start the signal checker for single instance
             single_instance::start_signal_checker(app.handle());
-            
+
             // Block setup until database is initialized
             tauri::async_runtime::block_on(async {
                 match database::init_database().await {
@@ -218,7 +214,7 @@ fn main() {
             // Register global shortcuts
             if let Err(e) = shortcuts.register("CommandOrControl+Shift+U", move || {
                 log::info!("Global shortcut triggered: Upload files");
-                
+
                 // Emit event to frontend to trigger file dialog
                 if let Some(window) = shortcut_app_handle.get_window("main") {
                     if let Err(e) = window.emit("global-shortcut-upload", {}) {
@@ -226,7 +222,7 @@ fn main() {
                     } else {
                         log::info!("Global shortcut event emitted successfully");
                     }
-                    
+
                     // Also show and focus the window
                     if let Err(e) = window.show() {
                         log::error!("Failed to show window from global shortcut: {}", e);
@@ -253,12 +249,13 @@ fn main() {
             tauri::async_runtime::spawn(async move {
                 // Wait a bit for database to initialize
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60)); // Daily
-                
+
+                let mut interval =
+                    tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60)); // Daily
+
                 loop {
                     interval.tick().await;
-                    
+
                     // Check if database is initialized before cleanup
                     if database::DB_POOL.get().is_some() {
                         if let Err(e) = config::auto_cleanup().await {
@@ -266,7 +263,7 @@ fn main() {
                         } else {
                             log::info!("Auto-cleanup completed successfully");
                         }
-                        
+
                         // Emit cleanup completion event
                         if let Some(window) = cleanup_app_handle.get_window("main") {
                             if let Err(e) = window.emit("auto-cleanup-completed", {}) {
@@ -301,12 +298,10 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
-            match event {
-                tauri::RunEvent::ExitRequested { .. } => {
-                    single_instance::cleanup_lock_file();
-                }
-                _ => {}
+        .run(|_app_handle, event| match event {
+            tauri::RunEvent::ExitRequested { .. } => {
+                single_instance::cleanup_lock_file();
             }
+            _ => {}
         });
 }

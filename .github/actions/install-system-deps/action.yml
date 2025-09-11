@@ -23,7 +23,8 @@ runs:
           curl \
           wget \
           file \
-          libssl-dev
+          libssl-dev \
+          xvfb
         
         # Install GTK and WebKit dependencies with version fallbacks
         sudo apt-get install -y \
