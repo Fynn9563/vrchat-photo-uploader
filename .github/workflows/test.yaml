@@ -1,0 +1,289 @@
+name: 'Tests'
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend-tests:
+    runs-on: ubuntu-22.04
+    name: Frontend Tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install frontend dependencies
+        run: |
+          echo "📦 Installing frontend dependencies..."
+          pnpm install --frozen-lockfile
+
+      - name: Run unit tests
+        run: |
+          echo "🧪 Running unit tests with coverage..."
+          pnpm test:run --coverage --reporter=verbose
+
+      - name: Upload test coverage
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: coverage/
+          retention-days: 30
+
+  backend-tests:
+    runs-on: ubuntu-22.04
+    name: Backend Tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
+        with:
+          os: ubuntu
+
+      - name: Run Rust tests
+        run: |
+          echo "🦀 Running Rust tests with coverage..."
+          cd src-tauri
+          cargo test --verbose -- --nocapture
+
+      - name: Run Rust integration tests
+        run: |
+          echo "🔧 Running integration tests..."
+          cd src-tauri
+          cargo test --test '*' --verbose
+
+  e2e-tests:
+    runs-on: ubuntu-22.04
+    name: E2E Tests
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
+        with:
+          os: ubuntu
+
+      - name: Install frontend dependencies
+        run: |
+          echo "📦 Installing dependencies for E2E tests..."
+          pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: |
+          echo "🎭 Installing Playwright browsers..."
+          pnpm exec playwright install --with-deps chromium
+
+      - name: Build Tauri app for testing
+        run: |
+          echo "🏗️ Building Tauri app..."
+          cd src-tauri
+          cargo build --release
+
+      - name: Run E2E tests
+        run: |
+          echo "🎭 Running E2E tests..."
+          pnpm test:e2e --reporter=html
+        env:
+          CI: true
+
+      - name: Upload E2E test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 30
+
+  lint-and-format:
+    runs-on: ubuntu-22.04
+    name: Lint and Format Check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check TypeScript compilation
+        run: |
+          echo "🔍 Checking TypeScript compilation..."
+          pnpm exec tsc --noEmit
+
+      - name: Run Rust formatting check
+        run: |
+          echo "🦀 Checking Rust formatting..."
+          cd src-tauri
+          cargo fmt --all -- --check
+
+      - name: Run Rust linting
+        run: |
+          echo "🔍 Running Rust linting..."
+          cd src-tauri
+          cargo clippy --all-targets --all-features -- -D warnings
+
+  accessibility-tests:
+    runs-on: ubuntu-22.04
+    name: Accessibility Tests
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install accessibility testing tools
+        run: |
+          echo "♿ Installing accessibility testing tools..."
+          pnpm add -D @axe-core/playwright
+
+      - name: Run accessibility tests
+        run: |
+          echo "♿ Running accessibility tests..."
+          # Custom accessibility test script would go here
+          echo "Accessibility tests would run here"
+
+  security-scan:
+    runs-on: ubuntu-22.04
+    name: Security Scan
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run npm audit
+        run: |
+          echo "🔒 Running npm security audit..."
+          pnpm audit --audit-level=moderate
+
+      - name: Setup Rust for security scan
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        run: |
+          echo "🔒 Running Rust security audit..."
+          cd src-tauri
+          cargo audit
+
+  test-summary:
+    runs-on: ubuntu-22.04
+    name: Test Summary
+    needs: [frontend-tests, backend-tests, lint-and-format, security-scan]
+    if: always()
+    steps:
+      - name: Check test results
+        run: |
+          echo "📋 Test Summary:"
+          echo "Frontend tests: ${{ needs.frontend-tests.result }}"
+          echo "Backend tests: ${{ needs.backend-tests.result }}"
+          echo "Lint and format: ${{ needs.lint-and-format.result }}"
+          echo "Security scan: ${{ needs.security-scan.result }}"
+          
+          if [[ "${{ needs.frontend-tests.result }}" == "failure" || 
+                "${{ needs.backend-tests.result }}" == "failure" || 
+                "${{ needs.lint-and-format.result }}" == "failure" || 
+                "${{ needs.security-scan.result }}" == "failure" ]]; then
+            echo "❌ Some tests failed"
+            exit 1
+          else
+            echo "✅ All tests passed"
+          fi

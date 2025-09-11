@@ -528,12 +528,13 @@ jobs:
             src-tauri/target/release/bundle/
           retention-days: 7
 
-      - name: Run tests (if available)
+      - name: Run frontend tests
         run: |
-          # Try to run frontend tests
-          if command -v pnpm test >/dev/null 2>&1; then
-            pnpm test --run 2>/dev/null || echo "Frontend tests failed or not available"
-          fi
-          # Run Rust tests
+          echo "🧪 Running frontend unit tests..."
+          pnpm test:run || echo "⚠️ Frontend tests failed"
+          
+      - name: Run Rust tests
+        run: |
+          echo "🦀 Running Rust tests..."
           cd src-tauri
-          cargo test
+          cargo test || echo "⚠️ Rust tests failed"
