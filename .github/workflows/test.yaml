@@ -77,13 +77,20 @@ jobs:
         run: |
           echo "🦀 Running Rust tests with coverage..."
           cd src-tauri
-          cargo test --verbose -- --nocapture
+          cargo test --lib --verbose -- --nocapture
+        env:
+          # Prevent libsoup conflicts by avoiding GUI components
+          DISPLAY: ""
+          WAYLAND_DISPLAY: ""
 
       - name: Run Rust integration tests
         run: |
           echo "🔧 Running integration tests..."
           cd src-tauri
           cargo test --test '*' --verbose
+        env:
+          DISPLAY: ""
+          WAYLAND_DISPLAY: ""
 
   e2e-tests:
     runs-on: ubuntu-22.04
