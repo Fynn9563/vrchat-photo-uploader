@@ -2,7 +2,7 @@
 
 ![Version](https://img.shields.io/github/v/release/fynn9563/vrchat-photo-uploader)
 ![License](https://img.shields.io/github/license/fynn9563/vrchat-photo-uploader?branch=master)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-brightgreen)
 
 A powerful desktop application for uploading VRChat photos to Discord with intelligent grouping, automatic metadata extraction, and seamless integration.
  
@@ -24,7 +24,6 @@ A powerful desktop application for uploading VRChat photos to Discord with intel
 1. **Download** the latest release for your platform from the [Releases page](https://github.com/fynn9563/vrchat-photo-uploader/releases)
 2. **Install** the application:
    - **Windows**: Run the `.msi` installer or use the portable `.exe`
-   - **macOS**: Open the `.dmg` file and drag to Applications
    - **Linux**: Use the `.AppImage` (portable) or install the `.deb` package
 3. **Configure** your Discord webhook in the app
 4. **Select** your VRChat photos and upload!
@@ -34,10 +33,6 @@ A powerful desktop application for uploading VRChat photos to Discord with intel
 ### Windows
 - **Installer**: Download `VRChat-Photo-Uploader-v{version}-x64.msi` for guided installation
 - **Portable**: Download `VRChat-Photo-Uploader-v{version}-x64.exe` for standalone use
-
-### macOS
-- **Apple Silicon (M1/M2)**: Download `VRChat-Photo-Uploader-v{version}-aarch64.dmg`
-- **Intel**: Download `VRChat-Photo-Uploader-v{version}-x64.dmg`
 
 ### Linux
 - **AppImage (Portable)**: Download `VRChat-Photo-Uploader-v{version}-x86_64.AppImage`
@@ -86,7 +81,6 @@ A powerful desktop application for uploading VRChat photos to Discord with intel
 ## ⚙️ System Requirements
 
 - **Windows**: Windows 10 or later
-- **macOS**: macOS 10.15 (Catalina) or later
 - **Linux**: Any modern distribution with GTK 3.24+
 
 ## 🤝 Contributing

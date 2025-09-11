@@ -213,12 +213,6 @@ jobs:
           - platform: 'windows-latest'
             args: '--target x86_64-pc-windows-msvc'
             target: 'x86_64-pc-windows-msvc'
-          - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
-            target: 'aarch64-apple-darwin'
-          - platform: 'macos-latest'
-            args: '--target x86_64-apple-darwin'
-            target: 'x86_64-apple-darwin'
           - platform: 'ubuntu-22.04'
             args: '--target x86_64-unknown-linux-gnu'
             target: 'x86_64-unknown-linux-gnu'
@@ -260,7 +254,7 @@ jobs:
       - name: Install system dependencies
         uses: ./.github/actions/install-system-deps
         with:
-          os: ${{ matrix.platform == 'ubuntu-22.04' && 'ubuntu' || (contains(matrix.platform, 'macos') && 'macos' || 'windows') }}
+          os: ${{ matrix.platform == 'ubuntu-22.04' && 'ubuntu' || 'windows' }}
 
       - name: Install frontend dependencies
         shell: bash
@@ -347,7 +341,6 @@ jobs:
             
             #### Installation
             - **Windows**: Download the `.msi` installer for a guided installation, or the `.exe` for a portable experience
-            - **macOS**: Download the `.dmg` file for Apple Silicon (M1/M2) or Intel processors
             - **Linux**: Download the `.AppImage` for a portable experience or the `.deb` for Debian/Ubuntu systems
             
             #### Features
@@ -359,7 +352,6 @@ jobs:
             
             #### System Requirements
             - **Windows**: Windows 10 or later
-            - **macOS**: macOS 10.15 or later
             - **Linux**: Any modern distribution with GTK 3.24+
             
             ---
@@ -375,7 +367,7 @@ jobs:
           echo "🔍 Verifying build artifacts and generating checksums..."
           
           # Find all release files in common Tauri output locations
-          RELEASE_FILES=$(find . -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.app.tar.gz" \) 2>/dev/null || true)
+          RELEASE_FILES=$(find . -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.deb" -o -name "*.AppImage" \) 2>/dev/null || true)
           
           # Also check specific Tauri bundle locations
           if [ -z "$RELEASE_FILES" ]; then
@@ -384,14 +376,12 @@ jobs:
               "src-tauri/target/release/bundle"
               "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle"
               "src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
-              "src-tauri/target/aarch64-apple-darwin/release/bundle"
-              "src-tauri/target/x86_64-apple-darwin/release/bundle"
             )
             
             for location in "${BUNDLE_LOCATIONS[@]}"; do
               if [ -d "$location" ]; then
                 echo "📁 Checking: $location"
-                FOUND_FILES=$(find "$location" -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" \) 2>/dev/null || true)
+                FOUND_FILES=$(find "$location" -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.deb" -o -name "*.AppImage" \) 2>/dev/null || true)
                 if [ -n "$FOUND_FILES" ]; then
                   RELEASE_FILES="$RELEASE_FILES $FOUND_FILES"
                 fi
@@ -451,14 +441,6 @@ jobs:
                     osslsigncode verify "$file" && echo "  ✅ Windows signature verified" || echo "  ⚠️ Windows signature check failed"
                   else
                     echo "  ℹ️ Windows signature verification skipped (osslsigncode not available)"
-                  fi
-                  ;;
-                *.dmg)
-                  # macOS: Check code signature
-                  if [[ "$RUNNER_OS" == "macOS" ]]; then
-                    codesign -dv --verbose=4 "$file" 2>&1 && echo "  ✅ macOS signature verified" || echo "  ⚠️ macOS signature check failed"
-                  else
-                    echo "  ℹ️ macOS signature verification skipped (not on macOS)"
                   fi
                   ;;
                 *.deb|*.AppImage)
