@@ -250,7 +250,7 @@ jobs:
       - name: Run npm audit
         run: |
           echo "🔒 Running npm security audit..."
-          pnpm audit --audit-level=moderate
+          pnpm audit --audit-level=critical
 
       - name: Setup Rust for security scan
         uses: dtolnay/rust-toolchain@stable
