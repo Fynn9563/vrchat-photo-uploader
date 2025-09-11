@@ -2,7 +2,7 @@ name: 'Install System Dependencies'
 description: 'Install system dependencies for Tauri builds across platforms'
 inputs:
   os:
-    description: 'Operating system (ubuntu, macos, windows)'
+    description: 'Operating system (ubuntu, windows)'
     required: true
 runs:
   using: 'composite'
@@ -151,14 +151,6 @@ runs:
         find /usr/lib -name "*webkit*.pc" -o -name "*javascript*.pc" 2>/dev/null | head -10 || echo "None found"
         
         echo "🎉 Ubuntu system dependencies installation completed!"
-
-    - name: Install system dependencies (macOS)
-      if: inputs.os == 'macos'
-      shell: bash
-      run: |
-        echo "🔧 Installing system dependencies for macOS..."
-        # macOS typically doesn't need additional system dependencies for Tauri
-        echo "✅ macOS dependencies check completed!"
 
     - name: Install system dependencies (Windows)
       if: inputs.os == 'windows'

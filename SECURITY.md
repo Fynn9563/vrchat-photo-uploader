@@ -19,7 +19,7 @@ $hash.Hash
 Get-Content SHA256SUMS | Select-String "VRChat-Photo-Uploader.msi"
 ```
 
-#### macOS/Linux
+#### Linux
 ```bash
 # Verify checksum
 sha256sum -c SHA256SUMS --ignore-missing
@@ -33,13 +33,6 @@ sha256sum -c SHA256SUMS --ignore-missing
 ```powershell
 # Check Authenticode signature
 Get-AuthenticodeSignature .\VRChat-Photo-Uploader.msi
-```
-
-**macOS (.dmg files)**:
-```bash
-# Verify code signature
-codesign -dv --verbose=4 VRChat-Photo-Uploader.dmg
-spctl -a -t open --context context:primary-signature -v VRChat-Photo-Uploader.dmg
 ```
 
 **Linux (.deb, .AppImage files)**:
@@ -56,7 +49,7 @@ All releases are built using GitHub Actions with the following security measures
 - **Dependency auditing**: All dependencies are scanned for known vulnerabilities
 - **Signature verification**: Build artifacts are verified during CI/CD
 - **Checksum generation**: SHA256 checksums are generated for all releases
-- **Multi-platform builds**: Consistent builds across Windows, macOS, and Linux
+- **Multi-platform builds**: Consistent builds across Windows and Linux
 
 ## 🚨 Security Issues
 
@@ -84,7 +77,6 @@ Each release includes:
 | Platform | File Types | Signing Method |
 |----------|------------|----------------|
 | Windows | `.exe`, `.msi` | Authenticode (if configured) |
-| macOS | `.dmg` | Apple Developer ID |
 | Linux | `.deb`, `.AppImage` | Checksum verification |
 
 ## 🔒 Security Features
