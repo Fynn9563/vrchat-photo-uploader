@@ -325,6 +325,33 @@ jobs:
       - name: Build frontend
         run: pnpm run build
 
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          echo "Generating release notes from commits..."
+          
+          # Get commit messages between versions
+          COMMITS=$(git log --pretty=format:"* %s" v${{ needs.get-version.outputs.version }}..HEAD --no-merges | head -20)
+          
+          # Create formatted release body
+          cat > release_notes.md << 'EOF'
+          ## 🆕 What's New in v${{ needs.get-version.outputs.new_version }}
+          
+          ### ✨ Changes in This Release
+          $COMMITS
+          
+          ---
+          
+          **📋 Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ needs.get-version.outputs.version }}...v${{ needs.get-version.outputs.new_version }}
+          
+          💡 **Note**: The app will automatically restart after updating.
+          EOF
+          
+          # Output for use in next step
+          echo "release_body<<EOF" >> $GITHUB_OUTPUT
+          cat release_notes.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0.5
         env:
@@ -334,29 +361,7 @@ jobs:
         with:
           tagName: v${{ needs.get-version.outputs.new_version }}
           releaseName: 'VRChat Photo Uploader v${{ needs.get-version.outputs.new_version }}'
-          releaseBody: |
-            ## What's Changed
-            
-            ### Version ${{ needs.get-version.outputs.new_version }}
-            
-            #### Installation
-            - **Windows**: Download the `.msi` installer for a guided installation, or the `.exe` for a portable experience
-            - **Linux**: Download the `.AppImage` for a portable experience or the `.deb` for Debian/Ubuntu systems
-            
-            #### Features
-            - Upload VRChat screenshots to Discord with metadata
-            - Automatic image grouping by world and players
-            - Image compression and optimization
-            - Progress tracking and retry functionality
-            - Forum channel support with threading
-            
-            #### System Requirements
-            - **Windows**: Windows 10 or later
-            - **Linux**: Any modern distribution with GTK 3.24+
-            
-            ---
-            
-            **Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ needs.get-version.outputs.version }}...v${{ needs.get-version.outputs.new_version }}
+          releaseBody: ${{ steps.release_notes.outputs.release_body }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
