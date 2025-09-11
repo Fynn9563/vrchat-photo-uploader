@@ -44,6 +44,12 @@ describe('UI Component Tests', () => {
         <div id="toastContainer" class="toast-container"></div>
       </div>
     `;
+    
+    // Set default values that happy-dom might not handle correctly
+    const maxImages = document.getElementById('maxImages') as HTMLSelectElement;
+    if (maxImages) {
+      maxImages.value = '10';
+    }
   });
 
   afterEach(() => {
