@@ -46,6 +46,7 @@ fn main() {
 
     let tray_menu = SystemTrayMenu::new()
         .add_item(CustomMenuItem::new("upload_files", "📁 Upload Files"))
+        .add_item(CustomMenuItem::new("open_vrchat_folder", "📂 Open VRChat Folder"))
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(CustomMenuItem::new("show", "🖼️ Show Window"))
         .add_item(CustomMenuItem::new("settings", "⚙️ Settings"))
@@ -93,6 +94,13 @@ fn main() {
                             log::error!("Failed to focus window: {}", e);
                         }
                     }
+                }
+                "open_vrchat_folder" => {
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = crate::commands::open_vrchat_folder().await {
+                            log::error!("Failed to open VRChat folder: {}", e);
+                        }
+                    });
                 }
                 "show" => {
                     let window = app.get_window("main").unwrap();
@@ -185,6 +193,7 @@ fn main() {
             should_compress_image,
             cleanup_temp_files,
             shell_open,
+            open_vrchat_folder,
             debug_extract_metadata
         ])
         .setup(|app| {
