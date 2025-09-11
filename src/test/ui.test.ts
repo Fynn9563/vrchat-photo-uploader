@@ -198,7 +198,7 @@ describe('UI Component Tests', () => {
     it('should have toast container', () => {
       const toastContainer = document.getElementById('toastContainer');
       expect(toastContainer).toBeTruthy();
-      expect(toastContainer.classList.contains('toast-container')).toBe(true);
+      expect(toastContainer?.classList.contains('toast-container')).toBe(true);
     });
   });
 
