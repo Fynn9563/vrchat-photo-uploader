@@ -38,6 +38,9 @@ tauri = { version = "1.8.3", features = [
     "system-tray",
     "notification-all",
     
+    # Update functionality
+    "updater",
+    
     # Development
     "devtools"
 ] }

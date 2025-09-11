@@ -1184,3 +1184,41 @@ kbd {
         transform: none !important;
     }
 }
+
+/* Update Status Styles */
+.update-status {
+    padding: 12px;
+    border-radius: var(--border-radius);
+    font-size: 0.9em;
+    text-align: center;
+    transition: var(--transition);
+}
+
+.update-status.checking {
+    background: var(--bg-tertiary);
+    color: var(--info);
+    border: 1px solid var(--info);
+}
+
+.update-status.success {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--success);
+    border: 1px solid var(--success);
+}
+
+.update-status.error {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--error);
+    border: 1px solid var(--error);
+}
+
+.update-section {
+    text-align: center;
+    border-top: 1px solid var(--border);
+    padding-top: 15px;
+}
+
+.update-section .btn {
+    width: 100%;
+    max-width: 200px;
+}

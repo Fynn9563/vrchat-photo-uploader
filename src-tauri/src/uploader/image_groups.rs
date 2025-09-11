@@ -43,9 +43,9 @@ pub async fn group_images_by_metadata(
         let group_key = if let Some(ref meta) = metadata {
             create_metadata_key(meta, timestamp, include_player_names)
         } else {
-            // Group unknown metadata by timestamp window (5 minutes)
+            // Group unknown metadata by timestamp window (10 minutes)
             if let Some(ts) = timestamp {
-                format!("unknown_{}", ts / 300) // 5-minute windows
+                format!("unknown_{}", ts / 600) // 10-minute windows
             } else {
                 format!("unknown_{}", file_path) // Individual
             }
@@ -138,7 +138,7 @@ fn create_metadata_key(
         String::new() // Don't group by players when disabled
     };
 
-    let time_window = timestamp.unwrap_or(0) / 300;
+    let time_window = timestamp.unwrap_or(0) / 600; // 10-minute windows
 
     format!("{}_{}_t{}", world_id, player_part, time_window)
 }

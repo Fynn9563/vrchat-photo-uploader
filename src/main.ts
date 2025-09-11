@@ -1520,6 +1520,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // Update event listeners
+  listen('update-available', (event: any) => {
+    console.log('Update available:', event.payload);
+    const updateStatus = document.getElementById('updateStatus');
+    if (updateStatus) {
+      updateStatus.style.display = 'block';
+      updateStatus.innerHTML = `✅ Update available: v${event.payload.version}<br><small>The update will be installed automatically.</small>`;
+      updateStatus.className = 'update-status success';
+    }
+    
+    // Show notification
+    new Notification('Update Available', {
+      body: `VRChat Photo Uploader v${event.payload.version} is available and will be installed automatically.`,
+      icon: './icon.png'
+    });
+  });
+
+  listen('no-update-available', () => {
+    console.log('No updates available');
+    const updateStatus = document.getElementById('updateStatus');
+    if (updateStatus) {
+      updateStatus.style.display = 'block';
+      updateStatus.innerHTML = '✅ You are using the latest version!';
+      updateStatus.className = 'update-status success';
+    }
+  });
+
   function loadGlobalShortcutsSetting() {
     const enabled = localStorage.getItem('global-shortcuts-enabled') !== 'false';
     const checkbox = document.getElementById('enableGlobalShortcuts') as HTMLInputElement;
@@ -1879,6 +1906,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   aboutBtn?.addEventListener('click', () => {
     loadAppVersion();
     ModalManager.openModal('aboutModal');
+  });
+
+  // Check for Updates button
+  const checkUpdatesBtn = document.getElementById('checkUpdatesBtn');
+  checkUpdatesBtn?.addEventListener('click', async () => {
+    const updateStatus = document.getElementById('updateStatus');
+    if (updateStatus) {
+      updateStatus.style.display = 'block';
+      updateStatus.innerHTML = '🔄 Checking for updates...';
+      updateStatus.className = 'update-status checking';
+    }
+
+    try {
+      await invoke('check_for_updates');
+    } catch (error) {
+      console.error('Failed to check for updates:', error);
+      if (updateStatus) {
+        updateStatus.innerHTML = `❌ Failed to check for updates: ${error}`;
+        updateStatus.className = 'update-status error';
+      }
+    }
   });
 
   // Tools

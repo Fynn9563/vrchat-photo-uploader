@@ -579,3 +579,47 @@ pub async fn cancel_upload_session(
         Err("Session not found".to_string())
     }
 }
+
+#[tauri::command]
+pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<(), String> {
+    log::info!("Checking for updates...");
+
+    match app_handle.updater().check().await {
+        Ok(update_response) => {
+            if update_response.is_update_available() {
+                log::info!("Update available: {}", update_response.latest_version());
+
+                // Emit event to frontend to show update notification
+                app_handle
+                    .emit_all(
+                        "update-available",
+                        serde_json::json!({
+                            "version": update_response.latest_version(),
+                            "body": update_response.body().map_or("", |v| v),
+                        }),
+                    )
+                    .ok();
+
+                // Show update dialog
+                match update_response.download_and_install().await {
+                    Ok(()) => {
+                        log::info!("Update downloaded and installed successfully");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        log::error!("Failed to download and install update: {}", e);
+                        Err(format!("Failed to install update: {}", e))
+                    }
+                }
+            } else {
+                log::info!("No updates available");
+                app_handle.emit_all("no-update-available", {}).ok();
+                Ok(())
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to check for updates: {}", e);
+            Err(format!("Failed to check for updates: {}", e))
+        }
+    }
+}

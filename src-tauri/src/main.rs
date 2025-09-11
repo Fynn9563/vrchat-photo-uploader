@@ -52,6 +52,8 @@ fn main() {
         .add_item(CustomMenuItem::new("metadata_editor", "📝 Metadata Editor"))
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(CustomMenuItem::new("about", "ℹ️ About"))
+        .add_item(CustomMenuItem::new("check_updates", "🔄 Check for Updates"))
+        .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(CustomMenuItem::new("quit", "❌ Quit"));
 
     let system_tray = SystemTray::new()
@@ -142,6 +144,15 @@ fn main() {
                         }
                     }
                 }
+                "check_updates" => {
+                    log::info!("Check for updates requested from tray");
+                    let app_handle = app.app_handle();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = commands::check_for_updates(app_handle).await {
+                            log::error!("Failed to check for updates: {}", e);
+                        }
+                    });
+                }
                 "quit" => {
                     log::info!("Application quit requested from tray");
                     single_instance::cleanup_lock_file();
@@ -185,7 +196,8 @@ fn main() {
             should_compress_image,
             cleanup_temp_files,
             shell_open,
-            debug_extract_metadata
+            debug_extract_metadata,
+            check_for_updates
         ])
         .setup(|app| {
             log::info!("Setting up application...");

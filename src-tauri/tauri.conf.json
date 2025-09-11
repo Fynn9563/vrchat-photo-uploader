@@ -112,6 +112,14 @@
       "iconPath": "icons/icon.png",
       "iconAsTemplate": true,
       "menuOnLeftClick": false
+    },
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/Fynn9563/vrchat-photo-uploader/releases/latest/download/latest.json"
+      ],
+      "dialog": true,
+      "pubkey": ""
     }
   }
 }
