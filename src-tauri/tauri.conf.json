@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "VRChat Photo Uploader",
-    "version": "2.0.13"
+    "version": "2.0.17"
   },
   "tauri": {
     "allowlist": {
@@ -73,6 +73,10 @@
       "shortDescription": "Upload VRChat photos to Discord webhooks",
       "longDescription": "A modern application to efficiently upload VRChat screenshots to Discord webhooks with metadata support and smart grouping features.",
       "deb": {
+        "depends": []
+      },
+      "rpm": {
+        "license": "MIT",
         "depends": []
       },
       "macOS": {

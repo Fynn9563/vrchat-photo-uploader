@@ -361,6 +361,31 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+      - name: Rename uploaded Linux packages
+        if: matrix.platform == 'ubuntu-22.04'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔄 Renaming uploaded Linux packages..."
+          
+          # Get the release ID
+          RELEASE_ID=$(gh api repos/${{ github.repository }}/releases/tags/v${{ needs.get-version.outputs.new_version }} --jq '.id')
+          echo "Release ID: $RELEASE_ID"
+          
+          # Get all assets and rename the Linux packages
+          gh api repos/${{ github.repository }}/releases/$RELEASE_ID/assets --jq '.[] | select(.name | contains("vr-chat-photo-uploader")) | {id: .id, name: .name}' | while read -r asset; do
+            if [ -n "$asset" ]; then
+              asset_id=$(echo "$asset" | jq -r '.id')
+              old_name=$(echo "$asset" | jq -r '.name')
+              new_name=$(echo "$old_name" | sed 's/vr-chat-photo-uploader/VRChat-Photo-Uploader/g')
+              
+              echo "Renaming asset: $old_name -> $new_name"
+              gh api repos/${{ github.repository }}/releases/assets/$asset_id -X PATCH -f name="$new_name"
+            fi
+          done
+          
+          echo "✅ Asset renaming completed"
+
       - name: Verify signatures and generate checksums
         shell: bash
         run: |
@@ -529,7 +554,7 @@ jobs:
         with:
           name: pr-build-linux-x64
           path: |
-            src-tauri/target/release/vrchat-photo-uploader
+            src-tauri/target/release/VRChat-Photo-Uploader
             src-tauri/target/release/bundle/
           retention-days: 7
 
