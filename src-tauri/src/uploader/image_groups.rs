@@ -140,9 +140,9 @@ pub fn create_discord_payload(
         } else {
             // Fallback content when no metadata is available
             if let Some(ts) = timestamp {
-                format!("📸 VRChat Photo taken at <t:{}:f>", ts)
+                format!("📸 Photo taken at <t:{}:f>", ts)
             } else {
-                "📸 VRChat Photo".to_string()
+                "📸 Photo".to_string()
             }
         };
         
@@ -153,7 +153,7 @@ pub fn create_discord_payload(
             let thread_name = if let Some(meta) = metadata {
                 create_thread_title(meta)
             } else {
-                "📸 VRChat Photos".to_string()
+                "📸 Photos".to_string()
             };
             log::info!("📝 Setting thread_name for forum post: '{}'", thread_name);
             payload.insert("thread_name".to_string(), thread_name);
@@ -197,7 +197,7 @@ fn create_message_content(metadata: &ImageMetadata, timestamp: Option<i64>, incl
             content.push_str(&format!(" at <t:{}:f>", ts));
         }
     } else {
-        content.push_str("📸 VRChat Photo");
+        content.push_str("📸 Photo");
         if let Some(ts) = timestamp {
             content.push_str(&format!(" taken at <t:{}:f>", ts));
         }
@@ -218,6 +218,6 @@ fn create_thread_title(metadata: &ImageMetadata) -> String {
             title
         }
     } else {
-        "📸 VRChat Photos".to_string()
+        "📸 Photos".to_string()
     }
 }

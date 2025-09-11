@@ -154,32 +154,10 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install minimal system dependencies for cargo check
-        shell: bash
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y \
-            pkg-config \
-            libssl-dev \
-            libglib2.0-dev \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            libsoup2.4-dev
-
-          if ! dpkg -s libwebkit2gtk-4.0-dev >/dev/null 2>&1; then
-            sudo apt-get install -y libwebkit2gtk-4.1-dev
-            sudo ln -sf \
-              /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.1.pc \
-              /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.0.pc
-          fi
-          
-          if ! dpkg -s libjavascriptcoregtk-4.0-dev >/dev/null 2>&1; then
-            sudo apt-get install -y libjavascriptcoregtk-4.1-dev
-            sudo ln -sf \
-              /usr/lib/x86_64-linux-gnu/pkgconfig/javascriptcoregtk-4.1.pc \
-              /usr/lib/x86_64-linux-gnu/pkgconfig/javascriptcoregtk-4.0.pc
-          fi
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
+        with:
+          os: ubuntu
 
       - name: Install dependencies
         shell: bash
@@ -235,9 +213,6 @@ jobs:
           - platform: 'windows-latest'
             args: '--target x86_64-pc-windows-msvc'
             target: 'x86_64-pc-windows-msvc'
-          - platform: 'windows-latest'
-            args: '--target i686-pc-windows-msvc'
-            target: 'i686-pc-windows-msvc'
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
             target: 'aarch64-apple-darwin'
@@ -282,73 +257,10 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
-      - name: Install system dependencies (Ubuntu)
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          echo "🔧 Installing system dependencies for Ubuntu 22.04..."
-          
-          # Update package list
-          sudo apt-get update -qq
-          
-          # Install essential build tools first
-          sudo apt-get install -y \
-            build-essential \
-            pkg-config \
-            curl \
-            wget \
-            file \
-            libssl-dev
-          
-          # Install GTK and WebKit dependencies
-          sudo apt-get install -y \
-            libgtk-3-dev \
-            libwebkit2gtk-4.0-dev \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf
-          
-          # Install GLib and related libraries (the critical missing piece)
-          sudo apt-get install -y \
-            libglib2.0-dev \
-            libgdk-pixbuf2.0-dev \
-            libatk1.0-dev \
-            libpango1.0-dev \
-            libcairo2-dev \
-            libcairo-gobject2 \
-            libgdk-pixbuf-2.0-0 \
-            libsoup2.4-dev \
-            libjavascriptcoregtk-4.0-dev \
-            libjavascriptcoregtk-4.1-dev
-          
-          # Install additional Tauri dependencies
-          sudo apt-get install -y \
-            libxdo-dev \
-            libxrandr2 \
-            libxss1 \
-            libxcursor1 \
-            libxcomposite1 \
-            libasound2-dev \
-            libxdamage1 \
-            libxext6 \
-            libxfixes3 \
-            libxi6 \
-            libxrender1 \
-            libcairo-gobject2 \
-            libdbus-1-dev
-          
-          # Verify critical packages are installed
-          echo "✅ Verifying installations..."
-          pkg-config --exists glib-2.0 && echo "✅ glib-2.0 found" || echo "❌ glib-2.0 missing"
-          pkg-config --exists gtk+-3.0 && echo "✅ gtk+-3.0 found" || echo "❌ gtk+-3.0 missing"
-          pkg-config --exists webkit2gtk-4.0 && echo "✅ webkit2gtk-4.0 found" || echo "❌ webkit2gtk-4.0 missing"
-          
-          # Show PKG_CONFIG_PATH for debugging
-          echo "PKG_CONFIG_PATH: ${PKG_CONFIG_PATH:-not set}"
-          echo "Available glib .pc files:"
-          find /usr/lib /usr/local/lib -name "*glib*.pc" 2>/dev/null | head -10 || echo "None found"
-          
-          echo "🎉 System dependencies installation completed!"
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
+        with:
+          os: ${{ matrix.platform == 'ubuntu-22.04' && 'ubuntu' || (contains(matrix.platform, 'macos') && 'macos' || 'windows') }}
 
       - name: Install frontend dependencies
         shell: bash
@@ -391,11 +303,36 @@ jobs:
           
           echo "✅ All versions are consistent!"
 
+      - name: Install security audit tools
+        shell: bash
+        run: |
+          cargo install cargo-audit
+          if ! command -v pnpm >/dev/null 2>&1; then
+            npm install -g pnpm
+          fi
+
+      - name: Run security audit
+        shell: bash
+        run: |
+          echo "🔍 Running security audits..."
+          
+          # Rust security audit
+          cd src-tauri
+          echo "Auditing Rust dependencies..."
+          cargo audit --color=always || echo "⚠️ Rust audit found issues"
+          
+          # Node.js security audit
+          cd ..
+          echo "Auditing Node.js dependencies..."
+          pnpm audit --audit-level=moderate || echo "⚠️ Node.js audit found issues"
+          
+          echo "✅ Security audit completed"
+
       - name: Build frontend
         run: pnpm run build
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
@@ -432,6 +369,102 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+      - name: Verify signatures and generate checksums
+        shell: bash
+        run: |
+          echo "🔍 Verifying build artifacts and generating checksums..."
+          
+          # Find all release files
+          RELEASE_FILES=$(find src-tauri/target -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" \) 2>/dev/null || true)
+          
+          if [ -z "$RELEASE_FILES" ]; then
+            echo "⚠️ No release files found in expected locations"
+            # Try alternative locations
+            RELEASE_FILES=$(find . -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" \) 2>/dev/null || true)
+          fi
+          
+          if [ -z "$RELEASE_FILES" ]; then
+            echo "❌ No release files found anywhere"
+            exit 1
+          fi
+          
+          # Create checksums directory
+          mkdir -p checksums
+          
+          for file in $RELEASE_FILES; do
+            if [ -f "$file" ]; then
+              echo "Checking: $file"
+              
+              # Verify file exists and is not empty
+              if [ ! -s "$file" ]; then
+                echo "❌ Empty file: $file"
+                exit 1
+              fi
+              
+              # Get file info
+              FILE_SIZE=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
+              echo "  Size: $FILE_SIZE bytes"
+              
+              # Generate checksums
+              FILENAME=$(basename "$file")
+              SHA256=$(sha256sum "$file" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$file" | cut -d' ' -f1)
+              echo "  SHA256: $SHA256"
+              echo "$SHA256  $FILENAME" >> checksums/SHA256SUMS
+              
+              # Check for signature files (Tauri may generate these)
+              if [ -f "${file}.sig" ]; then
+                echo "  ✅ Signature found: ${file}.sig"
+              elif [ -f "${file}.asc" ]; then
+                echo "  ✅ Signature found: ${file}.asc"
+              else
+                echo "  ℹ️ No detached signature file (may be embedded)"
+              fi
+              
+              # Platform-specific signature verification
+              case "$file" in
+                *.exe|*.msi)
+                  # Windows: Check for Authenticode signature
+                  if command -v osslsigncode >/dev/null 2>&1; then
+                    osslsigncode verify "$file" && echo "  ✅ Windows signature verified" || echo "  ⚠️ Windows signature check failed"
+                  else
+                    echo "  ℹ️ Windows signature verification skipped (osslsigncode not available)"
+                  fi
+                  ;;
+                *.dmg)
+                  # macOS: Check code signature
+                  if [[ "$RUNNER_OS" == "macOS" ]]; then
+                    codesign -dv --verbose=4 "$file" 2>&1 && echo "  ✅ macOS signature verified" || echo "  ⚠️ macOS signature check failed"
+                  else
+                    echo "  ℹ️ macOS signature verification skipped (not on macOS)"
+                  fi
+                  ;;
+                *.deb|*.AppImage)
+                  # Linux: Basic file integrity check
+                  file "$file" | grep -q "executable" && echo "  ✅ Linux executable verified" || echo "  ⚠️ Linux executable check failed"
+                  ;;
+              esac
+            fi
+          done
+          
+          # Sort checksums file
+          if [ -f checksums/SHA256SUMS ]; then
+            sort checksums/SHA256SUMS -o checksums/SHA256SUMS
+            echo "✅ Generated checksums/SHA256SUMS"
+            cat checksums/SHA256SUMS
+          else
+            echo "❌ No checksums generated"
+            exit 1
+          fi
+          
+          echo "✅ Artifact verification complete"
+
+      - name: Upload checksums as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums-${{ matrix.target }}
+          path: checksums/
+          retention-days: 90
+
   build-test:
     needs: get-version
     if: needs.get-version.outputs.should_release == 'false'
@@ -460,18 +493,9 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install system dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y \
-            build-essential \
-            pkg-config \
-            libssl-dev \
-            libgtk-3-dev \
-            libwebkit2gtk-4.0-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            libglib2.0-dev \
-            patchelf
+        uses: ./.github/actions/install-system-deps
+        with:
+          os: ubuntu
 
       - name: Install frontend dependencies
         run: |
@@ -493,6 +517,16 @@ jobs:
         run: |
           cd src-tauri
           cargo build --release
+
+      - name: Upload PR build artifacts
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-build-linux-x64
+          path: |
+            src-tauri/target/release/vrchat-photo-uploader
+            src-tauri/target/release/bundle/
+          retention-days: 7
 
       - name: Run tests (if available)
         run: |

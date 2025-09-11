@@ -1,0 +1,88 @@
+name: 'Install System Dependencies'
+description: 'Install system dependencies for Tauri builds across platforms'
+inputs:
+  os:
+    description: 'Operating system (ubuntu, macos, windows)'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Install system dependencies (Ubuntu)
+      if: inputs.os == 'ubuntu'
+      shell: bash
+      run: |
+        echo "🔧 Installing system dependencies for Ubuntu..."
+        
+        # Update package list
+        sudo apt-get update -qq
+        
+        # Install essential build tools first
+        sudo apt-get install -y \
+          build-essential \
+          pkg-config \
+          curl \
+          wget \
+          file \
+          libssl-dev
+        
+        # Install GTK and WebKit dependencies
+        sudo apt-get install -y \
+          libgtk-3-dev \
+          libwebkit2gtk-4.0-dev \
+          libwebkit2gtk-4.1-dev \
+          libappindicator3-dev \
+          librsvg2-dev \
+          patchelf
+        
+        # Install GLib and related libraries
+        sudo apt-get install -y \
+          libglib2.0-dev \
+          libgdk-pixbuf2.0-dev \
+          libatk1.0-dev \
+          libpango1.0-dev \
+          libcairo2-dev \
+          libcairo-gobject2 \
+          libgdk-pixbuf-2.0-0 \
+          libsoup2.4-dev \
+          libjavascriptcoregtk-4.0-dev \
+          libjavascriptcoregtk-4.1-dev
+        
+        # Install additional Tauri dependencies
+        sudo apt-get install -y \
+          libxdo-dev \
+          libxrandr2 \
+          libxss1 \
+          libxcursor1 \
+          libxcomposite1 \
+          libasound2-dev \
+          libxdamage1 \
+          libxext6 \
+          libxfixes3 \
+          libxi6 \
+          libxrender1 \
+          libcairo-gobject2 \
+          libdbus-1-dev
+        
+        # Verify critical packages
+        echo "✅ Verifying installations..."
+        pkg-config --exists glib-2.0 && echo "✅ glib-2.0 found" || echo "❌ glib-2.0 missing"
+        pkg-config --exists gtk+-3.0 && echo "✅ gtk+-3.0 found" || echo "❌ gtk+-3.0 missing"
+        pkg-config --exists webkit2gtk-4.0 && echo "✅ webkit2gtk-4.0 found" || echo "❌ webkit2gtk-4.0 missing"
+        
+        echo "🎉 Ubuntu system dependencies installation completed!"
+
+    - name: Install system dependencies (macOS)
+      if: inputs.os == 'macos'
+      shell: bash
+      run: |
+        echo "🔧 Installing system dependencies for macOS..."
+        # macOS typically doesn't need additional system dependencies for Tauri
+        echo "✅ macOS dependencies check completed!"
+
+    - name: Install system dependencies (Windows)
+      if: inputs.os == 'windows'
+      shell: bash
+      run: |
+        echo "🔧 Installing system dependencies for Windows..."
+        # Windows typically doesn't need additional system dependencies for Tauri
+        echo "✅ Windows dependencies check completed!"
