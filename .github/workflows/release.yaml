@@ -327,27 +327,28 @@ jobs:
 
       - name: Generate release notes
         id: release_notes
+        shell: bash
         run: |
           echo "Generating release notes from commits..."
           
           # Get commit messages between versions
           COMMITS=$(git log --pretty=format:"* %s" v${{ needs.get-version.outputs.version }}..HEAD --no-merges | head -20)
           
-          # Create formatted release body
-          cat > release_notes.md << 'EOF'
-          ## 🆕 What's New in v${{ needs.get-version.outputs.new_version }}
+          # Create formatted release body with proper escaping
+          {
+            echo "## 🆕 What's New in v${{ needs.get-version.outputs.new_version }}"
+            echo ""
+            echo "### ✨ Changes in This Release"
+            echo "$COMMITS"
+            echo ""
+            echo "---"
+            echo ""
+            echo "**📋 Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ needs.get-version.outputs.version }}...v${{ needs.get-version.outputs.new_version }}"
+            echo ""
+            echo "💡 **Note**: The app will automatically restart after updating."
+          } > release_notes.md
           
-          ### ✨ Changes in This Release
-          $COMMITS
-          
-          ---
-          
-          **📋 Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ needs.get-version.outputs.version }}...v${{ needs.get-version.outputs.new_version }}
-          
-          💡 **Note**: The app will automatically restart after updating.
-          EOF
-          
-          # Output for use in next step
+          # Output for use in next step  
           echo "release_body<<EOF" >> $GITHUB_OUTPUT
           cat release_notes.md >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
