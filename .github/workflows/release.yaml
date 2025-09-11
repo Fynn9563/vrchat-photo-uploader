@@ -529,7 +529,7 @@ jobs:
         with:
           name: pr-build-linux-x64
           path: |
-            src-tauri/target/release/vrchat-photo-uploader
+            src-tauri/target/release/VRChat-Photo-Uploader
             src-tauri/target/release/bundle/
           retention-days: 7
 

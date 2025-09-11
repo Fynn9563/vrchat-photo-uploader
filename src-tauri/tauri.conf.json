@@ -75,6 +75,10 @@
       "deb": {
         "depends": []
       },
+      "rpm": {
+        "license": "MIT",
+        "depends": []
+      },
       "macOS": {
         "frameworks": [],
         "minimumSystemVersion": "",

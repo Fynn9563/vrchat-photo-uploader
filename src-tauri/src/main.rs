@@ -96,11 +96,12 @@ fn main() {
                     }
                 }
                 "open_vrchat_folder" => {
-                    tauri::async_runtime::spawn(async move {
-                        if let Err(e) = crate::commands::open_vrchat_folder().await {
-                            log::error!("Failed to open VRChat folder: {}", e);
+                    if let Some(window) = app.get_window("main") {
+                        if let Err(e) = window.emit("open-vrchat-folder-request", {}) {
+                            log::error!("Failed to emit open VRChat folder event: {}", e);
                         }
-                    });
+                        // Window will be shown by frontend only if folder selection dialog is needed
+                    }
                 }
                 "show" => {
                     let window = app.get_window("main").unwrap();
@@ -193,7 +194,6 @@ fn main() {
             should_compress_image,
             cleanup_temp_files,
             shell_open,
-            open_vrchat_folder,
             debug_extract_metadata
         ])
         .setup(|app| {

@@ -1,5 +1,5 @@
 [package]
-name = "vrchat-photo-uploader"
+name = "VRChat-Photo-Uploader"
 version = "2.0.13"
 description = "A powerful tool for uploading VRChat photos to Discord"
 authors = ["Fynn9563"]
@@ -84,5 +84,5 @@ incremental = true
 debug = true
 
 [[bin]]
-name = "vrchat-photo-uploader"
+name = "VRChat-Photo-Uploader"
 path = "src/main.rs"
