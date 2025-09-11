@@ -176,7 +176,9 @@ pub async fn process_upload_queue(
     // Update database session status (non-blocking)
     let session_id_for_db = session_id.clone();
     tokio::spawn(async move {
-        if let Ok(Some((_total, completed, successful, failed))) = database::get_upload_session_stats(&session_id_for_db).await {
+        if let Ok(Some((_total, completed, successful, failed))) =
+            database::get_upload_session_stats(&session_id_for_db).await
+        {
             let _ = database::update_upload_session_progress(
                 &session_id_for_db,
                 completed,
