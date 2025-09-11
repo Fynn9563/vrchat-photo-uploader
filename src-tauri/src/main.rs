@@ -46,6 +46,10 @@ fn main() {
 
     let tray_menu = SystemTrayMenu::new()
         .add_item(CustomMenuItem::new("upload_files", "📁 Upload Files"))
+        .add_item(CustomMenuItem::new(
+            "open_vrchat_folder",
+            "📂 Open VRChat Folder",
+        ))
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(CustomMenuItem::new("show", "🖼️ Show Window"))
         .add_item(CustomMenuItem::new("settings", "⚙️ Settings"))
@@ -92,6 +96,14 @@ fn main() {
                         if let Err(e) = window.set_focus() {
                             log::error!("Failed to focus window: {}", e);
                         }
+                    }
+                }
+                "open_vrchat_folder" => {
+                    if let Some(window) = app.get_window("main") {
+                        if let Err(e) = window.emit("open-vrchat-folder-request", {}) {
+                            log::error!("Failed to emit open VRChat folder event: {}", e);
+                        }
+                        // Window will be shown by frontend only if folder selection dialog is needed
                     }
                 }
                 "show" => {

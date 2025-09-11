@@ -3,6 +3,31 @@
 version = 4
 
 [[package]]
+name = "VRChat-Photo-Uploader"
+version = "2.0.13"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ctrlc",
+ "dirs",
+ "env_logger",
+ "flate2",
+ "image",
+ "log",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "sysinfo",
+ "tauri",
+ "tauri-build",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5232,31 +5257,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vrchat-photo-uploader"
-version = "2.0.13"
-dependencies = [
- "anyhow",
- "chrono",
- "ctrlc",
- "dirs",
- "env_logger",
- "flate2",
- "image",
- "log",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "sqlx",
- "sysinfo",
- "tauri",
- "tauri-build",
- "thiserror 1.0.69",
- "tokio",
- "uuid",
-]
 
 [[package]]
 name = "vswhom"

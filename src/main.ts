@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/api/dialog';
 import { readBinaryFile } from '@tauri-apps/api/fs';
 import { getVersion } from '@tauri-apps/api/app';
+import { appWindow } from '@tauri-apps/api/window';
 
 console.log('VRChat Photo Uploader starting...');
 
@@ -1484,6 +1485,47 @@ document.addEventListener('DOMContentLoaded', async () => {
   listen('show-metadata-editor', () => {
   console.log('Tray: Metadata Editor requested');
   ModalManager.openModal('metadataEditorModal');
+  });
+
+  // Listen for system tray VRChat folder open request
+  listen('open-vrchat-folder-request', async () => {
+    console.log('Tray: Open VRChat folder requested');
+    try {
+      if (selectedVRChatFolder) {
+        // Folder already selected - open it without showing the window
+        await invoke('shell_open', { path: selectedVRChatFolder });
+        state.showSuccess(`Opened VRChat folder: ${selectedVRChatFolder}`);
+      } else {
+        // No folder selected - show window and dialog
+        try {
+          await appWindow.show();
+          await appWindow.setFocus();
+        } catch (e) {
+          console.warn('Failed to show/focus window:', e);
+        }
+        
+        const selected = await open({
+          directory: true,
+          title: 'Select VRChat Photos Folder'
+        });
+        
+        if (selected && typeof selected === 'string') {
+          selectedVRChatFolder = selected;
+          localStorage.setItem('vrchat-folder-path', selected);
+          state.showSuccess(`Selected VRChat folder: ${selected}`);
+          
+          const openVRChatFolderBtn = document.getElementById('openVRChatFolderBtn');
+          if (openVRChatFolderBtn) {
+            openVRChatFolderBtn.innerHTML = '📂 Open VRChat Folder';
+          }
+          
+          await invoke('shell_open', { path: selected });
+        }
+      }
+    } catch (error) {
+      console.error('Error handling VRChat folder request:', error);
+      state.showError(`Failed to open VRChat folder: ${error}`);
+    }
   });
 
   // Listen for global shortcut events
