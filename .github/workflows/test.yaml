@@ -180,6 +180,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
+        with:
+          os: ubuntu
+
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
