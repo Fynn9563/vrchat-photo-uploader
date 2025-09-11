@@ -46,7 +46,10 @@ fn main() {
 
     let tray_menu = SystemTrayMenu::new()
         .add_item(CustomMenuItem::new("upload_files", "📁 Upload Files"))
-        .add_item(CustomMenuItem::new("open_vrchat_folder", "📂 Open VRChat Folder"))
+        .add_item(CustomMenuItem::new(
+            "open_vrchat_folder",
+            "📂 Open VRChat Folder",
+        ))
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(CustomMenuItem::new("show", "🖼️ Show Window"))
         .add_item(CustomMenuItem::new("settings", "⚙️ Settings"))

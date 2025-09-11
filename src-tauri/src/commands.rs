@@ -540,7 +540,6 @@ pub async fn shell_open(path: String) -> Result<(), String> {
     Ok(())
 }
 
-
 #[tauri::command]
 pub async fn cancel_upload_session(
     session_id: String,
@@ -580,4 +579,3 @@ pub async fn cancel_upload_session(
         Err("Session not found".to_string())
     }
 }
-
