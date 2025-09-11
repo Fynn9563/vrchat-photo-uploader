@@ -3,8 +3,11 @@ use std::path::PathBuf;
 use sysinfo::{Pid, System};
 use tauri::{AppHandle, Manager};
 
+#[derive(Debug)]
+pub struct SingleInstanceError;
+
 /// Check if another instance of the application is already running
-pub fn check_single_instance() -> Result<(), ()> {
+pub fn check_single_instance() -> Result<(), SingleInstanceError> {
     let lock_file = get_lock_file_path();
 
     // Check if lock file exists
@@ -27,7 +30,7 @@ pub fn check_single_instance() -> Result<(), ()> {
                             pid
                         );
                         signal_existing_instance();
-                        return Err(()); // Exit this instance
+                        return Err(SingleInstanceError); // Exit this instance
                     }
                 }
             }

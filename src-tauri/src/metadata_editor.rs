@@ -169,7 +169,7 @@ fn inject_png_metadata(png_data: &[u8], metadata_json: &str) -> AppResult<Vec<u8
     }
 
     const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
-    if &png_data[0..8] != PNG_SIGNATURE {
+    if png_data[0..8] != PNG_SIGNATURE {
         return Err(AppError::invalid_file_type("Not a valid PNG file"));
     }
 
@@ -201,15 +201,13 @@ fn inject_png_metadata(png_data: &[u8], metadata_json: &str) -> AppResult<Vec<u8
         }
 
         // Skip existing Description chunks to avoid duplicates
-        if chunk_type_str == "tEXt" || chunk_type_str == "iTXt" {
-            if pos + 8 + length <= png_data.len() {
-                let chunk_data = &png_data[pos + 8..pos + 8 + length];
-                if let Ok(text) = std::str::from_utf8(chunk_data) {
-                    if text.starts_with("Description\0") {
-                        // Skip this chunk
-                        pos += 12 + length;
-                        continue;
-                    }
+        if (chunk_type_str == "tEXt" || chunk_type_str == "iTXt") && pos + 8 + length <= png_data.len() {
+            let chunk_data = &png_data[pos + 8..pos + 8 + length];
+            if let Ok(text) = std::str::from_utf8(chunk_data) {
+                if text.starts_with("Description\0") {
+                    // Skip this chunk
+                    pos += 12 + length;
+                    continue;
                 }
             }
         }

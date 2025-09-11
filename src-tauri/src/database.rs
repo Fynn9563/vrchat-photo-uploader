@@ -58,7 +58,7 @@ pub async fn init_database() -> AppResult<()> {
     }
 
     // Try different connection approaches
-    let connection_attempts = vec![
+    let connection_attempts = [
         format!("sqlite:{}", db_path.display()),
         format!(
             "sqlite:///{}",

@@ -844,10 +844,11 @@ mod tests {
 
         let result = parse_vrchat_metadata(invalid_json);
         // Should handle invalid JSON gracefully
-        match result {
-            Ok(_) => {}  // Might succeed with empty metadata
-            Err(_) => {} // Might fail, both are acceptable
+        // Both success and failure are acceptable for invalid JSON
+        if let Ok(_) = result {
+            // Might succeed with empty metadata
         }
+        // Might fail, both outcomes are acceptable
     }
 
     #[test]

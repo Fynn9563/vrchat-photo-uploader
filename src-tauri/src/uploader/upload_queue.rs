@@ -11,6 +11,7 @@ use super::image_groups::{create_discord_payload, ImageGroup};
 use super::progress_tracker::*;
 
 /// Main function to process the upload queue
+#[allow(clippy::too_many_arguments)]
 pub async fn process_upload_queue(
     webhook: Webhook,
     file_paths: Vec<String>,
@@ -175,16 +176,14 @@ pub async fn process_upload_queue(
     // Update database session status (non-blocking)
     let session_id_for_db = session_id.clone();
     tokio::spawn(async move {
-        if let Ok(stats) = database::get_upload_session_stats(&session_id_for_db).await {
-            if let Some((_total, completed, successful, failed)) = stats {
-                let _ = database::update_upload_session_progress(
-                    &session_id_for_db,
-                    completed,
-                    successful,
-                    failed,
-                )
-                .await;
-            }
+        if let Ok(Some((_total, completed, successful, failed))) = database::get_upload_session_stats(&session_id_for_db).await {
+            let _ = database::update_upload_session_progress(
+                &session_id_for_db,
+                completed,
+                successful,
+                failed,
+            )
+            .await;
         }
     });
 
@@ -192,6 +191,7 @@ pub async fn process_upload_queue(
 }
 
 /// Process a single group of images with enhanced error handling
+#[allow(clippy::too_many_arguments)]
 async fn process_image_group_with_failure_handling(
     client: &DiscordClient,
     webhook: &Webhook,
@@ -539,6 +539,7 @@ async fn process_image_group_with_failure_handling(
 }
 
 /// Upload a chunk of images with thread ID support
+#[allow(clippy::too_many_arguments)]
 pub async fn upload_image_chunk_with_thread_id(
     client: &DiscordClient,
     webhook: &Webhook,
@@ -669,6 +670,7 @@ async fn try_upload_chunk_with_thread_id(
 }
 
 /// Upload files with compression
+#[allow(clippy::too_many_arguments)]
 async fn upload_compressed_chunk_with_thread_id(
     client: &DiscordClient,
     webhook: &Webhook,

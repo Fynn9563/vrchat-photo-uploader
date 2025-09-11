@@ -59,14 +59,15 @@ impl From<Config> for AppConfig {
 
 impl From<AppConfig> for Config {
     fn from(app_config: AppConfig) -> Self {
-        let mut config = Config::default();
-        config.last_webhook_id = app_config.last_webhook_id;
-        config.group_by_metadata = app_config.group_by_metadata;
-        config.max_images_per_message = app_config.max_images_per_message;
-        config.enable_global_shortcuts = app_config.enable_global_shortcuts;
-        config.auto_compress_threshold = app_config.auto_compress_threshold;
-        config.upload_quality = app_config.upload_quality;
-        config
+        Config {
+            last_webhook_id: app_config.last_webhook_id,
+            group_by_metadata: app_config.group_by_metadata,
+            max_images_per_message: app_config.max_images_per_message,
+            enable_global_shortcuts: app_config.enable_global_shortcuts,
+            auto_compress_threshold: app_config.auto_compress_threshold,
+            upload_quality: app_config.upload_quality,
+            ..Default::default()
+        }
     }
 }
 

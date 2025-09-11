@@ -562,20 +562,20 @@ pub async fn cancel_upload_session(
             app_handle.emit_all("upload-cancelled", &session_id).ok();
             app_handle.emit_all("upload-progress", &session_id).ok();
 
-            return Ok(());
+            Ok(())
         } else {
             log::warn!(
                 "Cannot cancel session {} - current status: {}",
                 session_id,
                 session_progress.session_status
             );
-            return Err(format!(
+            Err(format!(
                 "Session is not active (status: {})",
                 session_progress.session_status
-            ));
+            ))
         }
     } else {
         log::warn!("Attempted to cancel non-existent session: {}", session_id);
-        return Err("Session not found".to_string());
+        Err("Session not found".to_string())
     }
 }

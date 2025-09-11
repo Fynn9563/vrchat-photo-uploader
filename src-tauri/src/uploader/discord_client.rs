@@ -32,6 +32,12 @@ pub struct DiscordClient {
     retry_config: RetryConfig,
 }
 
+impl Default for DiscordClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiscordClient {
     pub fn new() -> Self {
         Self {
@@ -210,6 +216,12 @@ impl DiscordClient {
 pub struct UploadPayload {
     files: Vec<(String, Vec<u8>, String, String)>, // (filename, data, mime_type, field_name)
     text_fields: HashMap<String, String>,
+}
+
+impl Default for UploadPayload {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl UploadPayload {
