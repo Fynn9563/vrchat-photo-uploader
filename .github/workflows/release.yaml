@@ -325,41 +325,11 @@ jobs:
       - name: Build frontend
         run: pnpm run build
 
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0.5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-        with:
-          tagName: v${{ needs.get-version.outputs.new_version }}
-          releaseName: 'VRChat Photo Uploader v${{ needs.get-version.outputs.new_version }}'
-          releaseBody: |
-            ## What's Changed
-            
-            ### Version ${{ needs.get-version.outputs.new_version }}
-            
-            #### Installation
-            - **Windows**: Download the `.msi` installer for a guided installation, or the `.exe` for a portable experience
-            - **Linux**: Download the `.AppImage` for a portable experience or the `.deb` for Debian/Ubuntu systems
-            
-            #### Features
-            - Upload VRChat screenshots to Discord with metadata
-            - Automatic image grouping by world and players
-            - Image compression and optimization
-            - Progress tracking and retry functionality
-            - Forum channel support with threading
-            
-            #### System Requirements
-            - **Windows**: Windows 10 or later
-            - **Linux**: Any modern distribution with GTK 3.24+
-            
-            ---
-            
-            **Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ needs.get-version.outputs.version }}...v${{ needs.get-version.outputs.new_version }}
-          releaseDraft: false
-          prerelease: false
-          args: ${{ matrix.args }}
+      - name: Build Tauri packages only (no upload)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          cd src-tauri
+          cargo tauri build ${{ matrix.args }}
 
       - name: Rename Linux packages for consistency
         if: matrix.platform == 'ubuntu-22.04'
@@ -395,6 +365,42 @@ jobs:
           done
           
           echo "✅ Package renaming completed"
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0.5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        with:
+          tagName: v${{ needs.get-version.outputs.new_version }}
+          releaseName: 'VRChat Photo Uploader v${{ needs.get-version.outputs.new_version }}'
+          releaseBody: |
+            ## What's Changed
+            
+            ### Version ${{ needs.get-version.outputs.new_version }}
+            
+            #### Installation
+            - **Windows**: Download the `.msi` installer for a guided installation, or the `.exe` for a portable experience
+            - **Linux**: Download the `.AppImage` for a portable experience or the `.deb` for Debian/Ubuntu systems
+            
+            #### Features
+            - Upload VRChat screenshots to Discord with metadata
+            - Automatic image grouping by world and players
+            - Image compression and optimization
+            - Progress tracking and retry functionality
+            - Forum channel support with threading
+            
+            #### System Requirements
+            - **Windows**: Windows 10 or later
+            - **Linux**: Any modern distribution with GTK 3.24+
+            
+            ---
+            
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ needs.get-version.outputs.version }}...v${{ needs.get-version.outputs.new_version }}
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
 
       - name: Verify signatures and generate checksums
         shell: bash
