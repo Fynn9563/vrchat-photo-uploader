@@ -77,20 +77,21 @@ jobs:
         run: |
           echo "🦀 Running Rust tests with coverage..."
           cd src-tauri
-          cargo test --lib --verbose -- --nocapture
+          # Use xvfb-run to provide a virtual display and avoid libsoup conflicts
+          xvfb-run -a cargo test --lib --verbose -- --nocapture
         env:
-          # Prevent libsoup conflicts by avoiding GUI components
-          DISPLAY: ""
-          WAYLAND_DISPLAY: ""
+          # Additional environment variables to prevent GUI conflicts
+          GDK_BACKEND: x11
+          WEBKIT_DISABLE_COMPOSITING_MODE: 1
 
       - name: Run Rust integration tests
         run: |
           echo "🔧 Running integration tests..."
           cd src-tauri
-          cargo test --test '*' --verbose
+          xvfb-run -a cargo test --test '*' --verbose
         env:
-          DISPLAY: ""
-          WAYLAND_DISPLAY: ""
+          GDK_BACKEND: x11
+          WEBKIT_DISABLE_COMPOSITING_MODE: 1
 
   e2e-tests:
     runs-on: ubuntu-22.04
