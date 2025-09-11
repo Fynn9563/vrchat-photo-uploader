@@ -26,3 +26,9 @@ coverage
 *.sln
 *.sw?
 /src-tauri/~/.tauri
+
+# Tauri signing keys (security-sensitive)
+*.key
+*.pem
+tauri_*
+.tauri/
