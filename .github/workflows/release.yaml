@@ -331,8 +331,14 @@ jobs:
         run: |
           echo "Generating release notes from commits..."
           
-          # Get commit messages between versions
-          COMMITS=$(git log --pretty=format:"* %s" v${{ needs.get-version.outputs.version }}..HEAD --no-merges | head -20)
+          # Get commit messages since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"* %s" ${LAST_TAG}..HEAD --no-merges | head -20)
+          else
+            # If no previous tag exists, get recent commits
+            COMMITS=$(git log --pretty=format:"* %s" --no-merges -10)
+          fi
           
           # Create formatted release body with proper escaping
           {
@@ -343,7 +349,11 @@ jobs:
             echo ""
             echo "---"
             echo ""
-            echo "**📋 Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ needs.get-version.outputs.version }}...v${{ needs.get-version.outputs.new_version }}"
+            if [ -n "$LAST_TAG" ]; then
+              echo "**📋 Full Changelog**: https://github.com/${{ github.repository }}/compare/${LAST_TAG}...v${{ needs.get-version.outputs.new_version }}"
+            else
+              echo "**📋 Full Changelog**: https://github.com/${{ github.repository }}/commits/v${{ needs.get-version.outputs.new_version }}"
+            fi
             echo ""
             echo "💡 **Note**: The app will automatically restart after updating."
           } > release_notes.md
