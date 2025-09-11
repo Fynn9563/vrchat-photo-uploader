@@ -8,7 +8,7 @@ describe('Example Test', () => {
   it('should test string manipulation', () => {
     const text = 'VRChat Photo Uploader';
     expect(text.toLowerCase()).toBe('vrchat photo uploader');
-    expect(text.length).toBe(20);
+    expect(text.length).toBe(21);
   });
 
   it('should test array operations', () => {
