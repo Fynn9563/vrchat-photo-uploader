@@ -200,7 +200,7 @@ fn create_message_content_with_players(
     timestamp: Option<i64>,
     include_player_names: bool,
 ) -> (String, Vec<PlayerInfo>, bool) {
-    const MAX_LENGTH: usize = 1900; // Leave buffer for Discord's 2000 char limit
+    const MAX_LENGTH: usize = 1900; 
     let mut content = String::new();
     let mut remaining_players: Vec<PlayerInfo> = Vec::new();
     let mut had_players_in_main = false;
