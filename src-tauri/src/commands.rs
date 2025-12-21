@@ -23,6 +23,18 @@ pub struct UploadRequest {
     pub max_images_per_message: u8,
     pub is_forum_channel: bool,
     pub include_player_names: bool,
+    #[serde(default = "default_time_window")]
+    pub grouping_time_window: u32,
+    #[serde(default = "default_true")]
+    pub group_by_world: bool,
+}
+
+fn default_time_window() -> u32 {
+    10
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -161,6 +173,8 @@ pub async fn retry_failed_group(
             10,    // max_images_per_message = 10 (safe for forum channels)
             false, // is_forum_channel = false (default, will be set by UI if needed)
             true,  // include_player_names = true (default for retries)
+            10,    // grouping_time_window = 10 minutes (default)
+            true,  // group_by_world = true (default)
             progress_state_clone,
             new_session_id_clone,
             app_handle_clone,
@@ -305,6 +319,8 @@ pub async fn upload_images(
             effective_max_images,
             request.is_forum_channel,
             request.include_player_names,
+            request.grouping_time_window,
+            request.group_by_world,
             progress_state_clone,
             session_id_clone,
             app_handle_clone,
@@ -400,6 +416,155 @@ pub async fn get_image_info(file_path: String) -> Result<(u32, u32, u64), String
     InputValidator::validate_image_file(&file_path)?;
 
     image_processor::get_image_info(&file_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_image_info_batch(
+    file_paths: Vec<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<(String, Option<(u32, u32, u64)>)>, String> {
+    use tokio::sync::Semaphore;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let total = file_paths.len();
+    let completed = Arc::new(AtomicUsize::new(0));
+    let max_concurrent = num_cpus().min(8);
+    let semaphore = Arc::new(Semaphore::new(max_concurrent));
+
+    let handles: Vec<_> = file_paths
+        .into_iter()
+        .map(|file_path| {
+            let sem = semaphore.clone();
+            let completed = completed.clone();
+            let app_handle = app_handle.clone();
+            tokio::spawn(async move {
+                let _permit = sem.acquire().await.unwrap();
+                let result = tokio::task::spawn_blocking(move || {
+                    let result = InputValidator::validate_image_file(&file_path)
+                        .and_then(|_| image_processor::get_image_info(&file_path));
+                    match result {
+                        Ok(info) => (file_path, Some(info)),
+                        Err(e) => {
+                            log::warn!("Failed to get image info for {}: {}", file_path, e);
+                            (file_path, None)
+                        }
+                    }
+                })
+                .await
+                .unwrap_or_else(|e| {
+                    log::error!("Task panicked: {}", e);
+                    (String::new(), None)
+                });
+
+                let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                app_handle.emit_all("file-processing-progress", serde_json::json!({
+                    "phase": "reading",
+                    "completed": done,
+                    "total": total
+                })).ok();
+
+                result
+            })
+        })
+        .collect();
+
+    let mut results = Vec::new();
+    for handle in handles {
+        match handle.await {
+            Ok(result) => {
+                if !result.0.is_empty() {
+                    results.push(result);
+                }
+            }
+            Err(e) => {
+                log::error!("Image info task failed: {}", e);
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+fn num_cpus() -> usize {
+    std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(4)
+}
+
+#[tauri::command]
+pub fn generate_thumbnail(file_path: String) -> Result<String, String> {
+    InputValidator::validate_image_file(&file_path)?;
+
+    image_processor::generate_thumbnail(&file_path, 200).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn generate_thumbnails_batch(
+    file_paths: Vec<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<(String, Option<String>)>, String> {
+    use tokio::sync::Semaphore;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let total = file_paths.len();
+    let completed = Arc::new(AtomicUsize::new(0));
+    let max_concurrent = num_cpus().min(8);
+    let semaphore = Arc::new(Semaphore::new(max_concurrent));
+
+    let handles: Vec<_> = file_paths
+        .into_iter()
+        .map(|file_path| {
+            let sem = semaphore.clone();
+            let completed = completed.clone();
+            let app_handle = app_handle.clone();
+            tokio::spawn(async move {
+                let _permit = sem.acquire().await.unwrap();
+                let result = tokio::task::spawn_blocking(move || {
+                    let result = InputValidator::validate_image_file(&file_path)
+                        .and_then(|_| image_processor::generate_thumbnail(&file_path, 200));
+                    match result {
+                        Ok(thumb_path) => (file_path, Some(thumb_path)),
+                        Err(e) => {
+                            log::warn!("Failed to generate thumbnail for {}: {}", file_path, e);
+                            (file_path, None)
+                        }
+                    }
+                })
+                .await
+                .unwrap_or_else(|e| {
+                    log::error!("Task panicked: {}", e);
+                    (String::new(), None)
+                });
+
+                let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                app_handle.emit_all("file-processing-progress", serde_json::json!({
+                    "phase": "thumbnails",
+                    "completed": done,
+                    "total": total
+                })).ok();
+
+                result
+            })
+        })
+        .collect();
+
+    let mut results = Vec::new();
+    for handle in handles {
+        match handle.await {
+            Ok(result) => {
+                if !result.0.is_empty() {
+                    results.push(result);
+                }
+            }
+            Err(e) => {
+                log::error!("Thumbnail task failed: {}", e);
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 #[tauri::command]

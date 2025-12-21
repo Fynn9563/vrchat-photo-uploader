@@ -146,7 +146,7 @@ impl InputValidator {
     }
 }
 
-// File system security utilities
+/// File system security utilities
 pub struct FileSystemGuard;
 
 impl FileSystemGuard {

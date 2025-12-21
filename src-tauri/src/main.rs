@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![allow(non_snake_case)]
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -19,7 +20,7 @@ mod uploader;
 
 use commands::*;
 
-// Progress state type
+/// Progress state type
 type ProgressState = Arc<Mutex<HashMap<String, UploadProgress>>>;
 
 fn main() {
@@ -105,7 +106,7 @@ fn main() {
                         if let Err(e) = window.emit("open-vrchat-folder-request", {}) {
                             log::error!("Failed to emit open VRChat folder event: {}", e);
                         }
-                        // Window will be shown by frontend only if folder selection dialog is needed
+                        // Window shown by frontend if needed
                     }
                 }
                 "show" => {
@@ -205,6 +206,9 @@ fn main() {
             get_file_hash,
             cancel_upload_session,
             get_image_info,
+            get_image_info_batch,
+            generate_thumbnail,
+            generate_thumbnails_batch,
             should_compress_image,
             cleanup_temp_files,
             shell_open,

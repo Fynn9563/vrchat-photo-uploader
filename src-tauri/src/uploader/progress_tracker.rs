@@ -3,7 +3,7 @@ use crate::errors::{safe_progress_read, safe_progress_update, ProgressState};
 use std::path::Path;
 use tokio::time::Instant;
 
-/// Check if an upload session has been cancelled
+/// Check if session is cancelled
 pub fn is_session_cancelled(progress_state: &ProgressState, session_id: &str) -> bool {
     safe_progress_read(
         progress_state,
@@ -14,7 +14,7 @@ pub fn is_session_cancelled(progress_state: &ProgressState, session_id: &str) ->
     .unwrap_or(true) // Treat missing/locked session as cancelled for safety
 }
 
-/// Mark an upload session as cancelled
+/// Mark session as cancelled
 pub fn mark_session_cancelled(progress_state: &ProgressState, session_id: &str) {
     safe_progress_update(progress_state, session_id, "mark cancelled", |progress| {
         progress.session_status = "cancelled".to_string();
@@ -27,7 +27,7 @@ pub fn mark_session_cancelled(progress_state: &ProgressState, session_id: &str) 
     });
 }
 
-/// Update progress to show current file being processed
+/// Update current file being processed
 pub fn update_progress_current(
     progress_state: &ProgressState,
     session_id: &str,
@@ -45,7 +45,7 @@ pub fn update_progress_current(
     );
 }
 
-/// Update progress with phase information (e.g., "Compressing", "Uploading")
+/// Update progress with phase (e.g., "Compressing")
 pub fn update_progress_current_with_phase(
     progress_state: &ProgressState,
     session_id: &str,
@@ -70,7 +70,7 @@ pub fn update_progress_current_with_phase(
     });
 }
 
-/// Mark a file upload as successful
+/// Mark file as successfully uploaded
 pub fn update_progress_success(
     progress_state: &ProgressState,
     session_id: &str,
@@ -93,7 +93,7 @@ pub fn update_progress_success(
     });
 }
 
-/// Mark a file upload as failed
+/// Mark file as failed
 pub fn update_progress_failure(
     progress_state: &ProgressState,
     session_id: &str,
@@ -132,7 +132,7 @@ pub fn update_progress_failure(
     });
 }
 
-/// Mark a group of files as failed (used for forum channel group failures)
+/// Mark group as failed (forum channel failures)
 pub fn update_progress_group_failure(
     progress_state: &ProgressState,
     session_id: &str,
@@ -165,7 +165,7 @@ pub fn update_progress_group_failure(
     );
 }
 
-/// Update the estimated time remaining for upload completion
+/// Update estimated time remaining
 pub fn update_time_estimate(
     progress_state: &ProgressState,
     session_id: &str,

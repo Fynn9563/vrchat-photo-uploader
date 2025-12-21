@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "VRChat Photo Uploader",
-    "version": "2.1.3"
+    "version": "3.0.0"
   },
   "tauri": {
     "allowlist": {
@@ -50,6 +50,10 @@
       },
       "notification": {
         "all": true
+      },
+      "protocol": {
+        "asset": true,
+        "assetScope": ["**"]
       }
     },
     "pattern": {

@@ -62,17 +62,17 @@ pub enum AppError {
     ForumChannelError { message: String },
 }
 
-// Convert to string for Tauri commands
+/// Convert to string for Tauri
 impl From<AppError> for String {
     fn from(error: AppError) -> Self {
         error.to_string()
     }
 }
 
-// Custom result type
+/// Custom result type
 pub type AppResult<T> = Result<T, AppError>;
 
-// Upload-specific error helpers
+/// Upload error helpers
 impl AppError {
     pub fn validation(field: &str, message: &str) -> Self {
         Self::Validation {
@@ -152,10 +152,10 @@ impl AppError {
     }
 }
 
-// Progress state type alias
+/// Progress state type
 pub type ProgressState = Arc<Mutex<HashMap<String, UploadProgress>>>;
 
-// Utility functions for common error patterns
+/// Safe progress state update
 pub fn safe_progress_update<F>(
     progress_state: &ProgressState,
     session_id: &str,
@@ -225,7 +225,7 @@ where
     }
 }
 
-// UI event emission with error handling
+/// Emit UI event with error handling
 pub fn safe_emit_event(app_handle: &tauri::AppHandle, event_name: &str, payload: &str) -> bool {
     match app_handle.emit_all(event_name, payload) {
         Ok(_) => {

@@ -35,39 +35,93 @@
     <!-- Upload Settings -->
     <div class="card">
       <h2 class="card-title">⚙️ Upload Settings</h2>
-      <div class="settings-grid">
-        <div class="form-group">
-          <div class="checkbox-group">
-            <input
-              type="checkbox"
-              id="groupByMetadata"
-              class="checkbox"
-              checked
-            />
-            <label for="groupByMetadata" class="form-label"
-              >📋 Group by metadata</label
-            >
+
+      <div class="settings-sections">
+        <!-- Discord Settings Row -->
+        <div class="settings-row">
+          <div class="setting-item setting-item-toggle">
+            <div class="setting-toggle">
+              <input type="checkbox" id="isForumChannel" class="toggle-input" />
+              <label for="isForumChannel" class="toggle-label">
+                <span class="toggle-switch"></span>
+              </label>
+            </div>
+            <div class="setting-content">
+              <span class="setting-title">Forum Channel</span>
+              <span class="setting-description">Post to Discord forum threads</span>
+            </div>
           </div>
-          <div class="checkbox-group">
-            <input type="checkbox" id="isForumChannel" class="checkbox" />
-            <label for="isForumChannel" class="form-label"
-              >💬 Discord Forum Channel</label
-            >
+
+          <div class="setting-item setting-item-select">
+            <div class="setting-content">
+              <span class="setting-title">Images per Message</span>
+              <span class="setting-description">Max attachments per post</span>
+            </div>
+            <select id="maxImages" class="setting-select">
+              <option value="1">1</option>
+              <option value="5">5</option>
+              <option value="10" selected>10</option>
+            </select>
           </div>
         </div>
-          <div class="checkbox-group">
-            <input type="checkbox" id="includePlayerNames" class="checkbox" checked />
-            <label for="includePlayerNames" class="form-label">👥 Include player names in posts</label>
+
+        <!-- Grouping Section -->
+        <div class="settings-section">
+          <div class="section-header">
+            <div class="section-toggle">
+              <input type="checkbox" id="groupByMetadata" class="toggle-input" checked />
+              <label for="groupByMetadata" class="toggle-label">
+                <span class="toggle-switch"></span>
+              </label>
+            </div>
+            <div class="section-title-group">
+              <span class="section-title">Smart Grouping</span>
+              <span class="section-description">Automatically organize photos by metadata</span>
+            </div>
           </div>
-        <div class="form-group">
-          <label for="maxImages" class="form-label"
-            >📊 Max images per message</label
-          >
-          <select id="maxImages" class="form-control">
-            <option value="1">1</option>
-            <option value="5">5</option>
-            <option value="10" selected>10</option>
-          </select>
+
+          <div id="groupingSubOptions" class="section-options">
+            <div class="option-grid">
+              <div class="option-item">
+                <input type="checkbox" id="groupByWorld" class="checkbox" checked />
+                <label for="groupByWorld" class="option-label">
+                  <span class="option-icon">🌍</span>
+                  <span class="option-text">Group by world</span>
+                </label>
+              </div>
+
+              <div class="option-item option-item-with-select">
+                <div class="option-main">
+                  <input type="checkbox" id="groupByTime" class="checkbox" checked />
+                  <label for="groupByTime" class="option-label">
+                    <span class="option-icon">⏱️</span>
+                    <span class="option-text">Group by time</span>
+                  </label>
+                </div>
+                <div id="timeWindowOptions" class="option-select-wrapper">
+                  <select id="groupingTimeWindowPreset" class="option-select">
+                    <option value="5">5 min</option>
+                    <option value="10" selected>10 min</option>
+                    <option value="15">15 min</option>
+                    <option value="30">30 min</option>
+                    <option value="60">1 hour</option>
+                    <option value="120">2 hours</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                  <input type="number" id="groupingTimeWindow" class="option-input hidden" min="1" max="1440" value="10" placeholder="10">
+                  <span id="timeInputSuffix" class="option-suffix hidden">min</span>
+                </div>
+              </div>
+
+              <div class="option-item option-item-full">
+                <input type="checkbox" id="includePlayerNames" class="checkbox" checked />
+                <label for="includePlayerNames" class="option-label">
+                  <span class="option-icon">👥</span>
+                  <span class="option-text">Include player names in posts</span>
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -127,7 +181,7 @@
             🚀 Start Upload
           </button>
           <button id="pauseUpload" class="btn btn-secondary hidden">
-            ⏸️ Pause
+            ⏹️ Stop
           </button>
           <button id="clearQueue" class="btn btn-secondary">
             🗑️ Clear Queue
@@ -441,6 +495,12 @@
     <div class="loading-spinner"></div>
     <div id="loadingText" class="loading-text">Processing...</div>
     <div class="loading-subtext">Please wait while we process your images</div>
+    <div id="loadingProgressContainer" class="loading-progress-container hidden">
+      <div class="loading-progress-bar">
+        <div id="loadingProgressFill" class="loading-progress-fill"></div>
+      </div>
+      <div id="loadingProgressText" class="loading-progress-text">0%</div>
+    </div>
   </div>
 </body>
 </html>

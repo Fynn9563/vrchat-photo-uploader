@@ -1,6 +1,6 @@
 [package]
 name = "VRChat-Photo-Uploader"
-version = "2.1.3"
+version = "3.0.0"
 description = "A powerful tool for uploading VRChat photos to Discord"
 authors = ["Fynn9563"]
 repository = "https://github.com/fynn9563/vrchat-photo-uploader"
@@ -13,7 +13,7 @@ edition = "2021"
 tauri-build = { version = "1.5.1", features = [] }
 
 [dependencies]
-tauri = { version = "1.8.3", features = [
+tauri = { version = "1.8.3", features = [ "protocol-asset",
     # File system operations
     "fs-remove-file",
     "fs-read-dir",

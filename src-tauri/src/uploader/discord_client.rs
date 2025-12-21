@@ -25,7 +25,7 @@ impl Default for RetryConfig {
     }
 }
 
-/// Enhanced Discord API client with proper rate limiting
+/// Discord API client with rate limiting
 pub struct DiscordClient {
     client: Client,
     rate_limiter: Arc<Mutex<HashMap<String, Instant>>>,
@@ -142,6 +142,160 @@ impl DiscordClient {
         }
     }
 
+    /// Send text message to create forum thread, returns response for thread_id
+    pub async fn send_forum_text_message(
+        &self,
+        webhook_url: &str,
+        content: &str,
+        thread_name: Option<&str>,
+    ) -> AppResult<String> {
+        let webhook_id = self.extract_webhook_id(webhook_url);
+        self.wait_for_rate_limit(&webhook_id).await;
+
+        let mut attempt = 0;
+
+        loop {
+            let final_url = if webhook_url.contains('?') {
+                format!("{}&wait=true", webhook_url)
+            } else {
+                format!("{}?wait=true", webhook_url)
+            };
+
+            // Build JSON body with thread_name for forum channels
+            let body = if let Some(name) = thread_name {
+                serde_json::json!({
+                    "content": content,
+                    "thread_name": name
+                })
+            } else {
+                serde_json::json!({
+                    "content": content
+                })
+            };
+
+            let response = self
+                .client
+                .post(&final_url)
+                .header("Content-Type", "application/json")
+                .body(body.to_string())
+                .send()
+                .await?;
+
+            let status = response.status();
+            self.update_rate_limit(&webhook_id, &response).await;
+
+            if status.is_success() {
+                let response_text = response.text().await?;
+                log::debug!("Forum text message sent successfully");
+                return Ok(response_text);
+            }
+
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+
+            attempt += 1;
+            if should_retry_error(status.as_u16()) && attempt <= self.retry_config.max_retries {
+                let delay = if status == 429 {
+                    self.extract_retry_after(&error_text)
+                        .unwrap_or_else(|| self.calculate_backoff_delay(attempt))
+                } else {
+                    self.calculate_backoff_delay(attempt)
+                };
+
+                log::warn!(
+                    "Forum text message attempt {} failed, retrying in {:?}",
+                    attempt,
+                    delay
+                );
+                sleep(delay).await;
+                continue;
+            }
+
+            return Err(AppError::UploadFailed {
+                reason: format!("Failed to send forum text message: {} - {}", status, error_text),
+            });
+        }
+    }
+
+    /// Send text-only message (for player list follow-ups)
+    pub async fn send_text_message(
+        &self,
+        webhook_url: &str,
+        content: &str,
+        thread_id: Option<&str>,
+    ) -> AppResult<()> {
+        let webhook_id = self.extract_webhook_id(webhook_url);
+        self.wait_for_rate_limit(&webhook_id).await;
+
+        let mut attempt = 0;
+
+        loop {
+            // Build URL with required query parameters
+            let mut url_parts = vec![];
+            url_parts.push("wait=true".to_string());
+
+            if let Some(tid) = thread_id {
+                url_parts.push(format!("thread_id={}", tid));
+            }
+
+            let final_url = if webhook_url.contains('?') {
+                format!("{}&{}", webhook_url, url_parts.join("&"))
+            } else {
+                format!("{}?{}", webhook_url, url_parts.join("&"))
+            };
+
+            // Send as JSON body
+            let body = serde_json::json!({
+                "content": content
+            });
+
+            let response = self
+                .client
+                .post(&final_url)
+                .header("Content-Type", "application/json")
+                .body(body.to_string())
+                .send()
+                .await?;
+
+            let status = response.status();
+            self.update_rate_limit(&webhook_id, &response).await;
+
+            if status.is_success() {
+                log::debug!("Text message sent successfully");
+                return Ok(());
+            }
+
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+
+            attempt += 1;
+            if should_retry_error(status.as_u16()) && attempt <= self.retry_config.max_retries {
+                let delay = if status == 429 {
+                    self.extract_retry_after(&error_text)
+                        .unwrap_or_else(|| self.calculate_backoff_delay(attempt))
+                } else {
+                    self.calculate_backoff_delay(attempt)
+                };
+
+                log::warn!(
+                    "Text message attempt {} failed, retrying in {:?}",
+                    attempt,
+                    delay
+                );
+                sleep(delay).await;
+                continue;
+            }
+
+            return Err(AppError::UploadFailed {
+                reason: format!("Failed to send text message: {} - {}", status, error_text),
+            });
+        }
+    }
+
     fn extract_webhook_id(&self, url: &str) -> String {
         url.split('/').nth_back(1).unwrap_or("default").to_string()
     }
@@ -211,7 +365,7 @@ impl DiscordClient {
     }
 }
 
-/// Helper struct to hold upload payload data
+/// Upload payload with files and text fields
 #[derive(Debug, Clone)]
 pub struct UploadPayload {
     files: Vec<(String, Vec<u8>, String, String)>, // (filename, data, mime_type, field_name)
@@ -283,7 +437,8 @@ fn should_retry_error(status_code: u16) -> bool {
     matches!(status_code, 429 | 500 | 502 | 503 | 504)
 }
 
-/// Extract thread ID from Discord response for forum channels
+/// Extract thread ID from Discord response
+/// For forum channels, the thread_id is in the 'channel_id' field (not 'id' which is message ID)
 pub fn extract_thread_id(response_data: &str) -> Option<String> {
     log::info!("🔍 Attempting to extract thread_id from Discord response");
     log::debug!("Response data length: {} bytes", response_data.len());
@@ -303,24 +458,25 @@ pub fn extract_thread_id(response_data: &str) -> Option<String> {
         Ok(json) => {
             log::debug!("✅ Successfully parsed Discord response as JSON");
 
-            // For forum posts, Discord returns the thread/channel ID in the 'id' field
-            if let Some(id_value) = json.get("id") {
-                if let Some(id_str) = id_value.as_str() {
-                    log::info!(
-                        "🎉 Successfully extracted thread_id from 'id' field: {}",
-                        id_str
-                    );
-                    return Some(id_str.to_string());
-                }
-            }
-
-            // Alternative: sometimes it might be in 'channel_id'
+            // For forum posts, 'channel_id' is the thread ID we need for follow-up messages
+            // 'id' is just the message ID within that thread
             if let Some(channel_id) = json.get("channel_id").and_then(|v| v.as_str()) {
                 log::info!(
                     "🎉 Extracted thread_id from 'channel_id' field: {}",
                     channel_id
                 );
                 return Some(channel_id.to_string());
+            }
+
+            // Fallback to 'id' for regular channels (non-forum)
+            if let Some(id_value) = json.get("id") {
+                if let Some(id_str) = id_value.as_str() {
+                    log::info!(
+                        "🎉 Extracted thread_id from 'id' field (fallback): {}",
+                        id_str
+                    );
+                    return Some(id_str.to_string());
+                }
             }
 
             // Log the full structure for debugging

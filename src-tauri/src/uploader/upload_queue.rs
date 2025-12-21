@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
+use tauri::Manager;
 use tokio::time::{sleep, Duration, Instant};
 
 use crate::commands::Webhook;
@@ -10,7 +11,10 @@ use super::discord_client::{extract_thread_id, DiscordClient, UploadPayload};
 use super::image_groups::{create_discord_payload, ImageGroup};
 use super::progress_tracker::*;
 
-/// Main function to process the upload queue
+/// Safe chunk size to stay under Discord's 8MB limit with overhead
+const SAFE_CHUNK_SIZE_BYTES: u64 = 7 * 1024 * 1024;
+
+/// Process the upload queue
 #[allow(clippy::too_many_arguments)]
 pub async fn process_upload_queue(
     webhook: Webhook,
@@ -19,6 +23,8 @@ pub async fn process_upload_queue(
     max_images_per_message: u8,
     is_forum_channel: bool,
     include_player_names: bool,
+    grouping_time_window: u32,
+    group_by_world: bool,
     progress_state: ProgressState,
     session_id: String,
     app_handle: tauri::AppHandle,
@@ -77,12 +83,52 @@ pub async fn process_upload_queue(
         return;
     }
 
+    // Show metadata loading phase for all files
+    if let Some(first_file) = valid_files.first() {
+        update_progress_current_with_phase(
+            &progress_state,
+            &session_id,
+            first_file.clone(),
+            "Loading metadata",
+            0.0,
+        );
+        safe_emit_event(&app_handle, "upload-progress", &session_id);
+    }
+
+    // Emit loading metadata event for all files
+    app_handle
+        .emit_all(
+            "upload-item-progress",
+            serde_json::json!({
+                "session_id": session_id,
+                "phase": "loading_metadata",
+                "file_paths": valid_files
+            }),
+        )
+        .ok();
+
     // Group images if requested
     let groups = if group_by_metadata {
-        super::image_groups::group_images_by_metadata(valid_files, include_player_names).await
+        super::image_groups::group_images_by_metadata(
+            valid_files,
+            grouping_time_window,
+            group_by_world,
+        ).await
     } else {
         super::image_groups::create_individual_groups_with_metadata(valid_files).await
     };
+
+    // Emit grouping complete event
+    app_handle
+        .emit_all(
+            "upload-item-progress",
+            serde_json::json!({
+                "session_id": session_id,
+                "phase": "grouped",
+                "total_groups": groups.len()
+            }),
+        )
+        .ok();
 
     let start_time = Instant::now();
     let mut total_processed = 0;
@@ -114,6 +160,21 @@ pub async fn process_upload_queue(
             group.group_id,
             group.images.len()
         );
+
+        // Emit per-group progress
+        app_handle
+            .emit_all(
+                "upload-item-progress",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "phase": "group_start",
+                    "group_index": group_index,
+                    "total_groups": total_groups,
+                    "images_in_group": group.images.len(),
+                    "file_paths": group.images
+                }),
+            )
+            .ok();
 
         let group_success = process_image_group_with_failure_handling(
             &client,
@@ -192,7 +253,7 @@ pub async fn process_upload_queue(
     safe_emit_event(&app_handle, "upload-completed", &session_id);
 }
 
-/// Process a single group of images with enhanced error handling
+/// Process image group with error handling
 #[allow(clippy::too_many_arguments)]
 async fn process_image_group_with_failure_handling(
     client: &DiscordClient,
@@ -274,8 +335,9 @@ async fn process_image_group_with_failure_handling(
             chunk.len()
         );
 
-        let text_fields = create_discord_payload(
-            &group.metadata,
+        let (text_fields, overflow_messages) = create_discord_payload(
+            &group.all_worlds,
+            &group.all_players,
             group.timestamp,
             first_message,
             chunk_index,
@@ -283,6 +345,90 @@ async fn process_image_group_with_failure_handling(
             thread_id.as_deref(),
             include_player_names,
         );
+
+        // If this is the first message and we have overflow player messages,
+        // we need to send text first, then overflow, then images
+        let mut text_fields_for_images = text_fields.clone();
+        if first_message && !overflow_messages.is_empty() {
+            // Send the main text message first (this creates the forum thread if applicable)
+            log::info!("📤 Sending text message first (has {} overflow messages)", overflow_messages.len());
+
+            let main_content = text_fields.get("content").cloned().unwrap_or_default();
+
+            // For forum channels, include thread_name in first message
+            if is_forum_channel && is_first_group {
+                let thread_name = text_fields.get("thread_name").cloned();
+
+                // Send as text with thread_name to create the thread
+                match client.send_forum_text_message(
+                    &webhook.url,
+                    &main_content,
+                    thread_name.as_deref(),
+                ).await {
+                    Ok(response_data) => {
+                        // Extract thread_id from response
+                        if let Some(extracted_thread_id) = extract_thread_id(&response_data) {
+                            thread_id = Some(extracted_thread_id.clone());
+                            log::info!("✅ Forum thread created with thread_id: {}", extracted_thread_id);
+
+                            // Send overflow messages to the thread
+                            for (i, overflow_msg) in overflow_messages.iter().enumerate() {
+                                if let Err(e) = client.send_text_message(
+                                    &webhook.url,
+                                    overflow_msg,
+                                    Some(&extracted_thread_id),
+                                ).await {
+                                    log::warn!("Failed to send overflow message {}: {}", i + 1, e);
+                                }
+                            }
+                        } else {
+                            log::error!("Failed to extract thread_id from forum response");
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to send forum text message: {}", e);
+                        // Mark files as failed and return
+                        for file_path in chunk.iter() {
+                            update_progress_group_failure(
+                                progress_state,
+                                session_id,
+                                file_path.clone(),
+                                format!("Failed to create forum thread: {}", e),
+                                true,
+                                group.group_id.clone(),
+                            );
+                        }
+                        return false;
+                    }
+                }
+
+                // Clear text fields for image upload - images go to existing thread
+                text_fields_for_images.clear();
+            } else {
+                // Non-forum channel: send text first, then overflow, then images
+                if let Err(e) = client.send_text_message(
+                    &webhook.url,
+                    &main_content,
+                    thread_id.as_deref(),
+                ).await {
+                    log::warn!("Failed to send initial text message: {}", e);
+                } else {
+                    // Send overflow messages
+                    for (i, overflow_msg) in overflow_messages.iter().enumerate() {
+                        if let Err(e) = client.send_text_message(
+                            &webhook.url,
+                            overflow_msg,
+                            thread_id.as_deref(),
+                        ).await {
+                            log::warn!("Failed to send overflow message {}: {}", i + 1, e);
+                        }
+                    }
+                }
+
+                // Clear text fields for image upload
+                text_fields_for_images.clear();
+            }
+        }
 
         // Enhanced payload validation for forum channels
         if is_forum_channel && chunk_index > 0 && thread_id.is_none() {
@@ -326,6 +472,21 @@ async fn process_image_group_with_failure_handling(
                 "Preparing",
                 file_progress,
             );
+
+            // Emit per-file progress event
+            app_handle
+                .emit_all(
+                    "upload-item-progress",
+                    serde_json::json!({
+                        "session_id": session_id,
+                        "phase": "preparing",
+                        "file_path": file_path,
+                        "file_index": file_index,
+                        "chunk_size": chunk.len(),
+                        "progress": file_progress
+                    }),
+                )
+                .ok();
         }
 
         // Set main current image for the chunk
@@ -338,7 +499,7 @@ async fn process_image_group_with_failure_handling(
             client,
             webhook,
             chunk.clone(),
-            text_fields,
+            text_fields_for_images,
             thread_id.as_deref(),
             progress_state,
             session_id,
@@ -355,7 +516,7 @@ async fn process_image_group_with_failure_handling(
                     return false;
                 }
 
-                // For forum channels, extract thread_id from first response
+                // For forum channels, extract thread_id from first response (if not already extracted via text message)
                 if is_forum_channel && first_message && thread_id.is_none() {
                     log::info!(
                         "🔍 Attempting thread_id extraction from first forum message response..."
@@ -401,7 +562,7 @@ async fn process_image_group_with_failure_handling(
                 }
 
                 // Record successful uploads in database and update progress
-                for file_path in chunk {
+                for (file_index, file_path) in chunk.iter().enumerate() {
                     let file_name = Path::new(file_path)
                         .file_name()
                         .unwrap_or_default()
@@ -429,6 +590,20 @@ async fn process_image_group_with_failure_handling(
                     });
 
                     update_progress_success(progress_state, session_id, file_path.clone());
+
+                    // Emit per-file success event
+                    app_handle
+                        .emit_all(
+                            "upload-item-progress",
+                            serde_json::json!({
+                                "session_id": session_id,
+                                "phase": "success",
+                                "file_path": file_path,
+                                "file_index": file_index,
+                                "chunk_size": chunk.len()
+                            }),
+                        )
+                        .ok();
                 }
 
                 log::info!(
@@ -540,7 +715,7 @@ async fn process_image_group_with_failure_handling(
     true // Group succeeded
 }
 
-/// Upload a chunk of images with thread ID support
+/// Upload image chunk with thread ID support
 #[allow(clippy::too_many_arguments)]
 pub async fn upload_image_chunk_with_thread_id(
     client: &DiscordClient,
@@ -573,6 +748,20 @@ pub async fn upload_image_chunk_with_thread_id(
             0.0,
         );
         safe_emit_event(app_handle, "upload-progress", session_id);
+
+        // Emit streaming event for upload start
+        app_handle
+            .emit_all(
+                "upload-item-progress",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "phase": "uploading",
+                    "file_paths": file_paths,
+                    "count": file_paths.len(),
+                    "progress": 0
+                }),
+            )
+            .ok();
     }
 
     // Try normal upload first
@@ -625,7 +814,7 @@ pub async fn upload_image_chunk_with_thread_id(
     }
 }
 
-/// Try uploading files directly without compression
+/// Try upload without compression
 async fn try_upload_chunk_with_thread_id(
     client: &DiscordClient,
     webhook: &Webhook,
@@ -639,6 +828,19 @@ async fn try_upload_chunk_with_thread_id(
     if is_session_cancelled(progress_state, session_id) {
         return Err(AppError::upload_cancelled("payload creation", session_id));
     }
+
+    // Log file sizes before upload
+    let total_size: u64 = file_paths
+        .iter()
+        .filter_map(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len())
+        .sum();
+    let total_mb = total_size as f64 / 1024.0 / 1024.0;
+    log::info!(
+        "📤 Uploading {} files, total size: {:.2} MB",
+        file_paths.len(),
+        total_mb
+    );
 
     let mut payload = UploadPayload::new();
 
@@ -671,7 +873,51 @@ async fn try_upload_chunk_with_thread_id(
         .await
 }
 
-/// Upload files with compression
+/// Split files into chunks based on file size
+/// Returns Vec of (file_paths, total_size) for each chunk
+fn split_into_size_chunks(file_paths: &[String]) -> Vec<Vec<String>> {
+    let mut chunks = Vec::new();
+    let mut current_chunk = Vec::new();
+    let mut current_size: u64 = 0;
+
+    for path in file_paths {
+        let file_size = std::fs::metadata(path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        // If single file exceeds limit, put it alone in a chunk
+        if file_size > SAFE_CHUNK_SIZE_BYTES {
+            // First, save current chunk if not empty
+            if !current_chunk.is_empty() {
+                chunks.push(current_chunk);
+                current_chunk = Vec::new();
+                current_size = 0;
+            }
+            // Add oversized file as its own chunk
+            chunks.push(vec![path.clone()]);
+            continue;
+        }
+
+        // Would adding this file exceed the limit?
+        if current_size + file_size > SAFE_CHUNK_SIZE_BYTES && !current_chunk.is_empty() {
+            chunks.push(current_chunk);
+            current_chunk = Vec::new();
+            current_size = 0;
+        }
+
+        current_chunk.push(path.clone());
+        current_size += file_size;
+    }
+
+    // Don't forget the last chunk
+    if !current_chunk.is_empty() {
+        chunks.push(current_chunk);
+    }
+
+    chunks
+}
+
+/// Upload with compression
 #[allow(clippy::too_many_arguments)]
 async fn upload_compressed_chunk_with_thread_id(
     client: &DiscordClient,
@@ -703,7 +949,7 @@ async fn upload_compressed_chunk_with_thread_id(
         }
 
         // Update progress to show compression phase
-        let compression_progress = (i as f32 / file_paths.len() as f32) * 50.0; // Compression takes ~50% of chunk time
+        let compression_progress = (i as f32 / file_paths.len() as f32) * 50.0;
         let filename = Path::new(file_path)
             .file_name()
             .unwrap_or_default()
@@ -719,6 +965,21 @@ async fn upload_compressed_chunk_with_thread_id(
         );
         safe_emit_event(app_handle, "upload-progress", session_id);
 
+        // Emit per-file compression progress
+        app_handle
+            .emit_all(
+                "upload-item-progress",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "phase": "compressing",
+                    "file_path": file_path,
+                    "file_index": i,
+                    "total": file_paths.len(),
+                    "progress": compression_progress
+                }),
+            )
+            .ok();
+
         log::info!(
             "Compressing image {} of {} ({}%): {}",
             i + 1,
@@ -729,19 +990,49 @@ async fn upload_compressed_chunk_with_thread_id(
 
         match image_processor::compress_image(file_path, 85).await {
             Ok(compressed_path) => {
+                // Log compressed file size
+                if let Ok(metadata) = std::fs::metadata(&compressed_path) {
+                    let size_mb = metadata.len() as f64 / 1024.0 / 1024.0;
+                    log::info!(
+                        "  📷 {} -> {:.2} MB",
+                        filename,
+                        size_mb
+                    );
+                }
                 compressed_paths.push(compressed_path.clone());
-                cleanup_paths.push(compressed_path.clone()); // Track for cleanup
-                log::debug!(
-                    "Successfully compressed: {} -> {}",
-                    file_path,
-                    compressed_path
-                );
+                cleanup_paths.push(compressed_path.clone());
             }
             Err(e) => {
                 log::warn!("Failed to compress {}: {}, using original", file_path, e);
-                compressed_paths.push(file_path.clone()); // Use original
+                compressed_paths.push(file_path.clone());
             }
         }
+    }
+
+    // Calculate and log total payload size before upload
+    let total_size: u64 = compressed_paths
+        .iter()
+        .filter_map(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len())
+        .sum();
+    let total_mb = total_size as f64 / 1024.0 / 1024.0;
+    log::info!(
+        "📦 Total payload size: {:.2} MB ({} files)",
+        total_mb,
+        compressed_paths.len()
+    );
+
+    // Warn if approaching Discord's limit
+    if total_size > 25 * 1024 * 1024 {
+        log::warn!(
+            "⚠️ Payload size ({:.2} MB) exceeds Discord's 25 MB limit!",
+            total_mb
+        );
+    } else if total_size > 20 * 1024 * 1024 {
+        log::warn!(
+            "⚠️ Payload size ({:.2} MB) is close to Discord's 25 MB limit",
+            total_mb
+        );
     }
 
     // Final cancellation check before upload
@@ -767,6 +1058,20 @@ async fn upload_compressed_chunk_with_thread_id(
             50.0,
         );
         safe_emit_event(app_handle, "upload-progress", session_id);
+
+        // Emit streaming event for compressed upload start
+        app_handle
+            .emit_all(
+                "upload-item-progress",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "phase": "uploading_compressed",
+                    "file_paths": file_paths,
+                    "count": file_paths.len(),
+                    "progress": 50
+                }),
+            )
+            .ok();
     }
 
     log::info!(
@@ -786,6 +1091,115 @@ async fn upload_compressed_chunk_with_thread_id(
     )
     .await;
 
+    // Handle the result - if 413, try splitting into smaller chunks
+    let final_result = match result {
+        Ok(response) => Ok(response),
+        Err(e) if e.to_string().contains("413") || e.to_string().contains("Payload Too Large") => {
+            log::info!(
+                "📦 Compressed upload still too large, splitting into size-based chunks..."
+            );
+
+            // Split compressed files into size-based chunks
+            let chunks = split_into_size_chunks(&compressed_paths);
+            log::info!(
+                "📤 Split {} files into {} chunks based on size",
+                compressed_paths.len(),
+                chunks.len()
+            );
+
+            // Log chunk details
+            for (i, chunk) in chunks.iter().enumerate() {
+                let chunk_size: u64 = chunk
+                    .iter()
+                    .filter_map(|p| std::fs::metadata(p).ok())
+                    .map(|m| m.len())
+                    .sum();
+                log::info!(
+                    "  Chunk {}: {} files, {:.2} MB",
+                    i + 1,
+                    chunk.len(),
+                    chunk_size as f64 / 1024.0 / 1024.0
+                );
+            }
+
+            // Upload each chunk
+            // For non-forum channels (thread_id is None), don't try to extract or use thread_id
+            // For forum channels (thread_id is Some), keep using the same thread
+            let mut last_response = String::new();
+
+            for (chunk_idx, chunk_files) in chunks.iter().enumerate() {
+                // Check cancellation before each chunk
+                if is_session_cancelled(progress_state, session_id) {
+                    // Cleanup before returning
+                    for path in &cleanup_paths {
+                        if !file_paths.contains(path) {
+                            tokio::fs::remove_file(path).await.ok();
+                        }
+                    }
+                    return Err(AppError::upload_cancelled("chunk upload", session_id));
+                }
+
+                log::info!(
+                    "📤 Uploading chunk {}/{} ({} files)",
+                    chunk_idx + 1,
+                    chunks.len(),
+                    chunk_files.len()
+                );
+
+                // Only include text content in first chunk
+                // Continuation chunks upload silently without text
+                let chunk_text_fields = if chunk_idx == 0 {
+                    text_fields.clone()
+                } else {
+                    HashMap::new()
+                };
+
+                // For non-forum channels, don't use thread_id at all
+                // For forum channels, use the existing thread_id passed in
+                let chunk_result = try_upload_chunk_with_thread_id(
+                    client,
+                    webhook,
+                    chunk_files,
+                    &chunk_text_fields,
+                    thread_id, // Use original thread_id, don't extract new ones
+                    progress_state,
+                    session_id,
+                )
+                .await;
+
+                match chunk_result {
+                    Ok(response) => {
+                        last_response = response;
+                        log::info!("✅ Chunk {}/{} uploaded successfully", chunk_idx + 1, chunks.len());
+                    }
+                    Err(chunk_err) => {
+                        log::error!(
+                            "❌ Failed to upload chunk {}/{}: {}",
+                            chunk_idx + 1,
+                            chunks.len(),
+                            chunk_err
+                        );
+                        // Cleanup before returning
+                        for path in &cleanup_paths {
+                            if !file_paths.contains(path) {
+                                tokio::fs::remove_file(path).await.ok();
+                            }
+                        }
+                        return Err(chunk_err);
+                    }
+                }
+
+                // Small delay between chunks to avoid rate limiting
+                if chunk_idx < chunks.len() - 1 {
+                    sleep(Duration::from_millis(500)).await;
+                }
+            }
+
+            Ok(last_response)
+        }
+        Err(e) => Err(e),
+    };
+
     // Clean up compressed files
     for path in &cleanup_paths {
         if !file_paths.contains(path) {
@@ -797,5 +1211,5 @@ async fn upload_compressed_chunk_with_thread_id(
         }
     }
 
-    result
+    final_result
 }

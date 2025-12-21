@@ -1,5 +1,5 @@
 import './styles.css';
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke, convertFileSrc } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/api/dialog';
 import { readBinaryFile } from '@tauri-apps/api/fs';
@@ -8,7 +8,6 @@ import { appWindow } from '@tauri-apps/api/window';
 
 console.log('VRChat Photo Uploader starting...');
 
-// Enhanced type definitions
 interface Webhook {
   id: number;
   name: string;
@@ -21,13 +20,15 @@ interface QueueItem {
   filePath: string;
   filename: string;
   status: 'queued' | 'uploading' | 'success' | 'error';
+  statusText?: string;
   progress: number;
   error: string | null;
   fileSize?: number;
   dimensions?: { width: number; height: number };
   retryCount: number;
   selected: boolean;
-  thumbnailData?: string;
+  thumbnailPath?: string;
+  thumbnailLoaded?: boolean;
 }
 
 interface UploadProgress {
@@ -56,7 +57,7 @@ interface AppConfig {
   upload_quality: number;
 }
 
-// Enhanced state management
+// App state management
 class AppState {
   public webhooks: Webhook[] = [];
   private uploadQueue: QueueItem[] = [];
@@ -68,11 +69,16 @@ class AppState {
   getSelectedItems(): QueueItem[] {
     return this.uploadQueue.filter(item => item.selected);
   }
+
+  getAllQueueItems(): QueueItem[] {
+    return this.uploadQueue;
+  }
   private currentUploadSession: string | null = null;
   public selectedWebhookId: number | null = null;
   private progressPollingInterval: number | null = null;
   private isUploading: boolean = false;
   private notificationsEnabled: boolean = true;
+  private thumbnailObserver: IntersectionObserver | null = null;
 
   // Notification methods
   private async requestNotificationPermission(): Promise<boolean> {
@@ -125,12 +131,56 @@ class AppState {
   loadNotificationsSetting() {
     const saved = localStorage.getItem('notifications-enabled');
     this.notificationsEnabled = saved !== 'false';
-    
+
     const checkbox = document.getElementById('enableNotifications') as HTMLInputElement;
     if (checkbox) {
       checkbox.checked = this.notificationsEnabled;
     }
   }
+
+  // Thumbnail lazy loading methods
+  initThumbnailObserver() {
+    if (this.thumbnailObserver) {
+      this.thumbnailObserver.disconnect();
+    }
+
+    this.thumbnailObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            this.loadThumbnail(entry.target as HTMLElement);
+            this.thumbnailObserver?.unobserve(entry.target);
+          }
+        });
+      },
+      {
+        root: null,
+        rootMargin: '100px',
+        threshold: 0.1
+      }
+    );
+  }
+
+  private loadThumbnail(element: HTMLElement) {
+    const itemId = element.dataset.itemId;
+    if (!itemId) return;
+
+    const item = this.uploadQueue.find(q => q.id === itemId);
+    if (item?.thumbnailPath && !item.thumbnailLoaded) {
+      const img = element.querySelector('.queue-thumbnail-img') as HTMLImageElement;
+      if (img) {
+        img.src = convertFileSrc(item.thumbnailPath);
+        item.thumbnailLoaded = true;
+      }
+    }
+  }
+
+  private observeThumbnail(element: HTMLElement) {
+    if (this.thumbnailObserver) {
+      this.thumbnailObserver.observe(element);
+    }
+  }
+
   // Helper method for efficient base64 conversion
   private async arrayBufferToBase64(buffer: Uint8Array): Promise<string> {
       let binary = '';
@@ -150,7 +200,7 @@ class AppState {
       return btoa(binary);
     }
 
-  // In the AppState class, update loadWebhooks method:
+  // Load webhooks from database
   async loadWebhooks() {
     try {
       this.webhooks = await invoke('get_webhooks');
@@ -291,117 +341,88 @@ class AppState {
 
     if (filePaths.length === 0) return;
 
-    this.showLoadingIndicator(`Validating ${filePaths.length} files...`);
+    this.showLoadingIndicator(`Processing ${filePaths.length} files...`, true);
 
     const validFiles: QueueItem[] = [];
-    const YIELD_INTERVAL = 3; // Yield every 3 files
-    const BATCH_SIZE = 5; // Process in batches for better progress updates
-    
+    const fileInfoMap = new Map<string, { width: number; height: number; fileSize: number }>();
+
+    // Listen for progress events
+    const unlisten = await listen<{ phase: string; completed: number; total: number }>('file-processing-progress', (event) => {
+      const { phase, completed, total } = event.payload;
+      if (phase === 'reading') {
+        const percent = Math.round((completed / total) * 50);
+        this.setLoadingProgress(percent, `Reading ${completed}/${total}`);
+      } else if (phase === 'thumbnails') {
+        const percent = 50 + Math.round((completed / total) * 50);
+        this.setLoadingProgress(percent, `Thumbnails ${completed}/${total}`);
+      }
+    });
+
     try {
-      // Process files in batches to prevent UI blocking
-      for (let batchStart = 0; batchStart < filePaths.length; batchStart += BATCH_SIZE) {
-        const batchEnd = Math.min(batchStart + BATCH_SIZE, filePaths.length);
-        const batch = filePaths.slice(batchStart, batchEnd);
-        
-        console.log(`Processing batch ${Math.floor(batchStart/BATCH_SIZE) + 1}/${Math.ceil(filePaths.length/BATCH_SIZE)}`);
-        
-        for (let i = 0; i < batch.length; i++) {
-          const globalIndex = batchStart + i;
-          const filePath = batch[i];
-          
-          try {
-            // Update progress more frequently for better UX
-            const progressPercent = Math.round((globalIndex / filePaths.length) * 100);
-            this.updateLoadingProgress(
-              `Processing files... (${progressPercent}%)`, 
-              filePath.split(/[\\/]/).pop()
-            );
-            
-            // Yield control every few files
-            if (globalIndex % YIELD_INTERVAL === 0 && globalIndex > 0) {
-              console.log(`Yielding control after processing ${globalIndex + 1} files`);
-              await new Promise(resolve => setTimeout(resolve, 0));
-            }
-            
-            // Get file info with timeout protection
-            console.log(`Processing file: ${filePath}`);
-            const params = { filePath: filePath };
-            
-            // Add timeout to prevent hanging on corrupted files
-            const fileInfoPromise = invoke('get_image_info', params) as Promise<[number, number, number]>;
-            const timeoutPromise = new Promise<never>((_, reject) => 
-              setTimeout(() => reject(new Error('File processing timeout')), 10000)
-            );
-            
-            const [width, height, fileSize] = await Promise.race([fileInfoPromise, timeoutPromise]);
-            const filename = filePath.split(/[\\/]/).pop() || filePath;
+      this.updateLoadingProgress('Reading file information...', '');
+      this.setLoadingProgress(0, 'Reading files...');
+      console.log('Getting file info for all files in parallel...');
 
-            // Generate thumbnail data (with reasonable limits for VRChat screenshots)
-            let thumbnailData: string | undefined;
-            const MAX_THUMBNAIL_SIZE = 50 * 1024 * 1024; // 50MB limit (very generous for VRChat)
-            
-            if (fileSize <= MAX_THUMBNAIL_SIZE) {
-              try {
-                // Use Tauri's readBinaryFile for all files
-                const imageData = await readBinaryFile(filePath);
-                
-                // Convert Uint8Array to base64 using your existing method
-                const base64String = await this.arrayBufferToBase64(imageData);
-                
-                const ext = filePath.toLowerCase().split('.').pop();
-                const mimeType = ext === 'png' ? 'image/png' : 
-                                ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 
-                                ext === 'webp' ? 'image/webp' : 
-                                ext === 'gif' ? 'image/gif' : 'image/png';
-                
-                thumbnailData = `data:${mimeType};base64,${base64String}`;
-                console.log(`Generated thumbnail for ${filename} (${this.formatFileSize(fileSize)})`);
-              } catch (error) {
-                console.warn(`Failed to generate thumbnail for ${filename}:`, error);
-                // Still add the file to queue even if thumbnail fails
-              }
-            } else {
-              console.log(`Skipping thumbnail for extremely large file: ${filename} (${this.formatFileSize(fileSize)})`);
-            }
+      const fileInfoResults = await invoke<[string, [number, number, number] | null][]>('get_image_info_batch', {
+        filePaths: filePaths
+      });
 
-            const queueItem: QueueItem = {
-              id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              filePath: filePath,
-              filename: filename,
-              status: 'queued',
-              progress: 0,
-              error: null,
-              fileSize: fileSize,
-              dimensions: { width, height },
-              retryCount: 0,
-              selected: true,
-              thumbnailData: thumbnailData,
-            };
-
-            validFiles.push(queueItem);
-            console.log(`Added to queue: ${filename} (${width}x${height}, ${this.formatFileSize(fileSize)})`);
-            
-          } catch (error) {
-            console.error(`Failed to add ${filePath}:`, error);
-            this.showError(`Failed to add ${filePath.split(/[\\/]/).pop()}: ${error}`);
-          }
+      for (const [filePath, info] of fileInfoResults) {
+        if (info) {
+          const [width, height, fileSize] = info;
+          fileInfoMap.set(filePath, { width, height, fileSize });
+        } else {
+          console.error(`Failed to get info for ${filePath}`);
+          this.showError(`Failed to add ${filePath.split(/[\\/]/).pop()}`);
         }
-        
-        // Yield after each batch to keep UI responsive
-        if (batchEnd < filePaths.length) {
-          console.log(`Completed batch, yielding before next batch...`);
-          await new Promise(resolve => setTimeout(resolve, 10));
+      }
+
+      const validPaths = Array.from(fileInfoMap.keys());
+      if (validPaths.length > 0) {
+        this.updateLoadingProgress('Generating thumbnails...', '');
+        console.log(`Generating ${validPaths.length} thumbnails in parallel...`);
+
+        const thumbnailResults = await invoke<[string, string | null][]>('generate_thumbnails_batch', {
+          filePaths: validPaths
+        });
+
+        this.setLoadingProgress(100, 'Complete!');
+        console.log(`Generated ${thumbnailResults.filter(r => r[1]).length} thumbnails`);
+
+        for (const [filePath, thumbnailPath] of thumbnailResults) {
+          const fileInfo = fileInfoMap.get(filePath);
+          if (!fileInfo) continue;
+
+          const filename = filePath.split(/[\\/]/).pop() || filePath;
+
+          const queueItem: QueueItem = {
+            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            filePath: filePath,
+            filename: filename,
+            status: 'queued',
+            progress: 0,
+            error: null,
+            fileSize: fileInfo.fileSize,
+            dimensions: { width: fileInfo.width, height: fileInfo.height },
+            retryCount: 0,
+            selected: true,
+            thumbnailPath: thumbnailPath || undefined,
+            thumbnailLoaded: false,
+          };
+
+          validFiles.push(queueItem);
+          console.log(`Added to queue: ${filename} (${fileInfo.width}x${fileInfo.height}, ${this.formatFileSize(fileInfo.fileSize)})`);
         }
       }
 
     } finally {
+      unlisten();
       this.hideLoadingIndicator();
     }
 
-    // Update UI with results
     this.uploadQueue.push(...validFiles);
     this.updateQueueDisplay();
-    
+
     if (validFiles.length > 0) {
       this.showSuccess(`Added ${validFiles.length} files to upload queue`);
     }
@@ -410,7 +431,7 @@ class AppState {
   updateQueueDisplay() {
     const queueContainer = document.getElementById('uploadQueue');
     const queueItems = document.getElementById('queueItems');
-    
+
     if (this.uploadQueue.length === 0) {
       queueContainer?.classList.add('hidden');
       this.resetUploadState();
@@ -418,10 +439,10 @@ class AppState {
     }
 
     queueContainer?.classList.remove('hidden');
-    
+
     if (queueItems) {
       queueItems.innerHTML = '';
-      
+
       this.uploadQueue.forEach(item => {
         const itemElement = this.createQueueItemElement(item);
         queueItems.appendChild(itemElement);
@@ -429,6 +450,52 @@ class AppState {
     }
 
     this.updateControlButtons();
+  }
+
+  // Update item progress
+  updateQueueItemProgress(itemId: string) {
+    const item = this.uploadQueue.find(q => q.id === itemId);
+    if (!item) return;
+
+    const element = document.querySelector(`[data-id="${itemId}"]`);
+    if (!element) return;
+
+    // Update status text
+    const statusEl = element.querySelector('.queue-status');
+    if (statusEl) {
+      let statusIcon = '';
+      if (item.status === 'success') {
+        statusIcon = '<span class="status-icon success-icon">✅</span>';
+      } else if (item.status === 'error') {
+        statusIcon = '<span class="status-icon error-icon">❌</span>';
+      } else if (item.statusText === 'waiting') {
+        statusIcon = '<span class="status-icon waiting-icon">⏳</span>';
+      } else if (item.statusText === 'uploading' || item.statusText === 'optimizing' || item.statusText === 'preparing') {
+        statusIcon = '<span class="status-icon upload-icon">🔄</span>';
+      } else if (item.statusText === 'loading metadata') {
+        statusIcon = '<span class="status-icon">📋</span>';
+      } else {
+        statusIcon = '<span class="status-icon">📄</span>';
+      }
+      statusEl.innerHTML = `${item.statusText || item.status} ${statusIcon}`;
+    }
+
+    // Update progress bar
+    const progressBar = element.querySelector('.queue-progress-bar') as HTMLElement;
+    if (progressBar) {
+      progressBar.style.width = `${item.progress}%`;
+    }
+
+    // Update element class for status
+    element.className = `queue-item ${item.status}`;
+  }
+
+  // Find item by file path
+  findItemByPath(filePath: string): QueueItem | undefined {
+    const filename = filePath.split(/[\\/]/).pop() || '';
+    return this.uploadQueue.find(q =>
+      q.filePath === filePath || q.filename === filename
+    );
   }
 
   createQueueItemElement(item: QueueItem): HTMLElement {
@@ -440,31 +507,32 @@ class AppState {
     const dimensionsText = item.dimensions ? `${item.dimensions.width}×${item.dimensions.height}` : '';
 
     let statusIcon = '';
-    switch (item.status) {
-      case 'success':
-        statusIcon = '<span class="status-icon success-icon">✅</span>';
-        break;
-      case 'error':
-        statusIcon = '<span class="status-icon error-icon">❌</span>';
-        break;
-      case 'uploading':
-        statusIcon = '<span class="status-icon upload-icon">🔄</span>';
-        break;
-      default:
-        statusIcon = '<span class="status-icon">📄</span>';
+    if (item.status === 'success') {
+      statusIcon = '<span class="status-icon success-icon">✅</span>';
+    } else if (item.status === 'error') {
+      statusIcon = '<span class="status-icon error-icon">❌</span>';
+    } else if (item.statusText === 'waiting') {
+      statusIcon = '<span class="status-icon waiting-icon">⏳</span>';
+    } else if (item.statusText === 'uploading' || item.statusText === 'optimizing' || item.statusText === 'preparing') {
+      statusIcon = '<span class="status-icon upload-icon">🔄</span>';
+    } else if (item.statusText === 'loading metadata') {
+      statusIcon = '<span class="status-icon">📋</span>';
+    } else {
+      statusIcon = '<span class="status-icon">📄</span>';
     }
 
+    const thumbSrc = item.thumbnailPath && item.thumbnailLoaded ? convertFileSrc(item.thumbnailPath) : '';
     element.innerHTML = `
       <input type="checkbox" class="queue-checkbox" ${item.selected ? 'checked' : ''}>
-      <div class="queue-thumbnail">
-        ${item.thumbnailData ? 
-          `<img src="${item.thumbnailData}" alt="${item.filename}" class="queue-thumbnail-img" />` :
+      <div class="queue-thumbnail" data-item-id="${item.id}">
+        ${item.thumbnailPath ?
+          `<img src="${thumbSrc}" alt="${item.filename}" class="queue-thumbnail-img" loading="lazy" />` :
           item.filename.substring(0, 3).toUpperCase()
         }
       </div>
       <div class="queue-info">
         <div class="queue-filename">${item.filename}</div>
-        <div class="queue-status">${item.status} ${statusIcon}</div>
+        <div class="queue-status">${item.statusText || item.status} ${statusIcon}</div>
         <div class="queue-size">${sizeText} ${dimensionsText}</div>
         ${item.status === 'uploading' ? `
           <div class="queue-progress">
@@ -500,14 +568,18 @@ class AppState {
       this.retryUpload(item.id);
     });
 
-    // Setup image preview for thumbnail
+    // Setup lazy loading for thumbnail
     const thumbnail = element.querySelector('.queue-thumbnail') as HTMLElement;
-    if (thumbnail && item.thumbnailData) {
+    if (thumbnail && item.thumbnailPath) {
+      // Observe this element for lazy loading
+      this.observeThumbnail(thumbnail);
+
+      // Setup image preview - use original file path for full-size preview
       previewManager.setupThumbnailPreview(
-        thumbnail, 
-        item.thumbnailData, 
-        item.filename, 
-        item.fileSize, 
+        thumbnail,
+        item.filePath,
+        item.filename,
+        item.fileSize,
         item.dimensions
       );
     }
@@ -534,6 +606,14 @@ class AppState {
           (thumbnail as any)._previewCleanup();
         }
       }
+
+      // Clean up thumbnail temp file
+      if (item.thumbnailPath) {
+        const parts = item.thumbnailPath.split(/[\\/]/);
+        const filename = parts[parts.length - 1];
+        invoke('cleanup_temp_files', { tempFilenames: [filename] })
+          .catch(err => console.warn('Failed to cleanup thumbnail file:', err));
+      }
     }
 
     this.uploadQueue = this.uploadQueue.filter(item => item.id !== itemId);
@@ -552,11 +632,25 @@ class AppState {
       }
     });
 
+    // Clean up thumbnail temp files
+    const thumbnailFiles = this.uploadQueue
+      .filter(item => item.thumbnailPath)
+      .map(item => {
+        // Extract just the filename from the full path
+        const parts = item.thumbnailPath!.split(/[\\/]/);
+        return parts[parts.length - 1];
+      });
+
+    if (thumbnailFiles.length > 0) {
+      invoke('cleanup_temp_files', { tempFilenames: thumbnailFiles })
+        .catch(err => console.warn('Failed to cleanup thumbnail files:', err));
+    }
+
     if (this.isUploading && this.currentUploadSession) {
       console.log('Stopping active upload to clear queue');
       this.forceStopUpload();
     }
-    
+
     this.uploadQueue = [];
     this.updateQueueDisplay();
     this.showInfo('Queue cleared');
@@ -572,11 +666,21 @@ class AppState {
     this.updateQueueDisplay();
   }
 
+  resetUploadStatuses() {
+    // Reset upload statuses for re-uploading
+    this.uploadQueue.forEach(item => {
+      item.status = 'queued';
+      item.statusText = 'queued';
+      item.progress = 0;
+    });
+    this.updateQueueDisplay();
+  }
+
   updateControlButtons() {
     const selectedCount = this.uploadQueue.filter(item => item.selected).length;
     const startBtn = document.getElementById('startUpload') as HTMLButtonElement;
     const viewMetadataBtn = document.getElementById('viewMetadataBtn') as HTMLButtonElement;
-    
+
     if (startBtn) {
       startBtn.disabled = selectedCount === 0 || !this.selectedWebhookId || this.isUploading;
     }
@@ -594,10 +698,26 @@ class AppState {
       return;
     }
 
-    const selectedItems = this.uploadQueue.filter(item => item.selected);
+    let selectedItems = this.uploadQueue.filter(item => item.selected && item.status !== 'success');
     if (selectedItems.length === 0) {
-      this.showError('Please select files to upload');
-      return;
+      const allSelected = this.uploadQueue.filter(item => item.selected);
+      if (allSelected.length > 0 && allSelected.every(item => item.status === 'success')) {
+        const reupload = confirm(`All ${allSelected.length} selected files have already been uploaded. Do you want to upload them again?`);
+        if (reupload) {
+          allSelected.forEach(item => {
+            item.status = 'queued';
+            item.statusText = 'queued';
+            item.progress = 0;
+          });
+          this.updateQueueDisplay();
+          selectedItems = allSelected;
+        } else {
+          return;
+        }
+      } else {
+        this.showError('Please select files to upload');
+        return;
+      }
     }
 
     try {
@@ -609,11 +729,21 @@ class AppState {
       const maxImages = parseInt((document.getElementById('maxImages') as HTMLSelectElement).value);
       const includePlayerNames = (document.getElementById('includePlayerNames') as HTMLInputElement).checked;
 
+      // Get the new grouping sub-options
+      const groupByWorld = (document.getElementById('groupByWorld') as HTMLInputElement).checked;
+      const groupByTime = (document.getElementById('groupByTime') as HTMLInputElement).checked;
+
+      // Time window: if groupByTime is disabled, use 0 (no limit)
+      const timeWindowValue = parseInt((document.getElementById('groupingTimeWindow') as HTMLInputElement).value);
+      const groupingTimeWindow = groupByTime
+        ? (isNaN(timeWindowValue) ? 10 : timeWindowValue)
+        : 0;
+
       const progressSummary = document.getElementById('progressSummary');
       progressSummary?.classList.remove('hidden');
 
       const filePaths = selectedItems.map(item => item.filePath);
-      
+
       console.log('Starting upload with original file paths:', filePaths);
 
       const sessionId = await invoke('upload_images', {
@@ -623,11 +753,13 @@ class AppState {
           group_by_metadata: groupByMetadata,
           max_images_per_message: maxImages,
           is_forum_channel: isForumChannel,
-          include_player_names: includePlayerNames
+          include_player_names: includePlayerNames,
+          grouping_time_window: groupingTimeWindow,
+          group_by_world: groupByWorld
         }
       });
 
-      // CRITICAL: Store the current session ID
+      // Store session ID
       this.currentUploadSession = sessionId as string;
       console.log('Current upload session set to:', sessionId);
       this.showSuccess('Upload started!');
@@ -742,6 +874,23 @@ class AppState {
           if (progress.current_image.includes(item.filename) || progress.current_image === item.filePath) {
             item.status = 'uploading';
             item.progress = progress.current_progress;
+
+            if (progress.current_image.includes(' - ')) {
+              const [phase] = progress.current_image.split(' - ');
+              if (phase === 'Loading metadata') {
+                item.statusText = 'loading metadata';
+              } else if (phase === 'Compressing') {
+                item.statusText = 'optimizing';
+              } else if (phase === 'Uploading') {
+                item.statusText = 'uploading';
+              } else if (phase === 'Preparing') {
+                item.statusText = 'preparing';
+              } else {
+                item.statusText = 'uploading';
+              }
+            } else {
+              item.statusText = 'uploading';
+            }
             return;
           }
         }
@@ -769,7 +918,6 @@ class AppState {
       if (progressText) {
               if (progress.current_image) {
                 if (progress.current_image.includes(' - ')) {
-                  // Phase info already included (e.g., "Optimizing - filename")
                   const [phase, filename] = progress.current_image.split(' - ');
                   if (phase === 'Compressing') {
                     progressText.textContent = `Optimizing ${filename} for Discord...`;
@@ -777,11 +925,12 @@ class AppState {
                     progressText.textContent = `Uploading ${filename}...`;
                   } else if (phase === 'Preparing') {
                     progressText.textContent = `Preparing ${filename}...`;
+                  } else if (phase === 'Loading metadata') {
+                    progressText.textContent = `Loading metadata for ${filename}...`;
                   } else {
                     progressText.textContent = progress.current_image;
                   }
                 } else {
-                  // Default to uploading
                   const filename = progress.current_image.split(/[\\/]/).pop();
                   progressText.textContent = `Uploading ${filename}...`;
                 }
@@ -979,13 +1128,35 @@ class AppState {
     }
   }
 
-  showLoadingIndicator(message: string) {
+  showLoadingIndicator(message: string, showProgress: boolean = false) {
     const loadingOverlay = document.getElementById('loadingOverlay');
     const loadingText = document.getElementById('loadingText');
-    
+    const progressContainer = document.getElementById('loadingProgressContainer');
+
     if (loadingOverlay && loadingText) {
       loadingText.textContent = message;
       loadingOverlay.classList.remove('hidden');
+    }
+
+    if (progressContainer) {
+      if (showProgress) {
+        progressContainer.classList.remove('hidden');
+        this.setLoadingProgress(0);
+      } else {
+        progressContainer.classList.add('hidden');
+      }
+    }
+  }
+
+  setLoadingProgress(percent: number, text?: string) {
+    const progressFill = document.getElementById('loadingProgressFill');
+    const progressText = document.getElementById('loadingProgressText');
+
+    if (progressFill) {
+      progressFill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+    }
+    if (progressText) {
+      progressText.textContent = text || `${Math.round(percent)}%`;
     }
   }
 
@@ -1000,8 +1171,12 @@ class AppState {
 
   hideLoadingIndicator() {
     const loadingOverlay = document.getElementById('loadingOverlay');
+    const progressContainer = document.getElementById('loadingProgressContainer');
     if (loadingOverlay) {
       loadingOverlay.classList.add('hidden');
+    }
+    if (progressContainer) {
+      progressContainer.classList.add('hidden');
     }
   }
 
@@ -1234,7 +1409,8 @@ class ImagePreviewManager {
 
     // Create image element
     const img = document.createElement('img');
-    img.src = imagePath;
+    // Convert file path to Tauri asset URL
+    img.src = imagePath.startsWith('data:') ? imagePath : convertFileSrc(imagePath);
     img.alt = filename;
 
     // Create info overlay
@@ -1425,6 +1601,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   await state.loadWebhooks();
   state.loadNotificationsSetting();
 
+  // Initialize thumbnail lazy loading observer
+  state.initThumbnailObserver();
+
   // Setup modal events
   ModalManager.setupModalEvents();
 
@@ -1445,6 +1624,108 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     await state.addFilesToQueue(imageFiles);
     state.showSuccess(`Added ${imageFiles.length} images via drag & drop`);
+  });
+
+  // Upload progress events
+  listen<{
+    session_id: string;
+    phase: string;
+    file_path?: string;
+    file_paths?: string[];
+    file_index?: number;
+    total?: number;
+    chunk_size?: number;
+    progress?: number;
+    group_index?: number;
+    total_groups?: number;
+    images_in_group?: number;
+  }>('upload-item-progress', (event) => {
+    const data = event.payload;
+    const updatedItems: string[] = [];
+
+    // Update individual queue items based on phase
+    if (data.file_path) {
+      const item = state.findItemByPath(data.file_path);
+
+      if (item) {
+        switch (data.phase) {
+          case 'preparing':
+            item.statusText = 'preparing';
+            item.progress = 0;
+            break;
+          case 'compressing':
+            item.statusText = 'optimizing';
+            item.progress = 0;
+            break;
+          case 'success':
+            item.status = 'success';
+            item.statusText = 'uploaded';
+            item.progress = 100;
+            break;
+        }
+        updatedItems.push(item.id);
+      }
+    }
+
+    // Handle phase transitions for all items
+    if (data.phase === 'loading_metadata' && data.file_paths && Array.isArray(data.file_paths)) {
+      for (const filePath of data.file_paths) {
+        const item = state.findItemByPath(filePath);
+        if (item && item.status !== 'success') {
+          item.statusText = 'loading metadata';
+          item.progress = 0;
+          updatedItems.push(item.id);
+        }
+      }
+    }
+
+    // After grouping is complete, set all pending items to "waiting"
+    if (data.phase === 'grouped') {
+      for (const item of state.getAllQueueItems()) {
+        if (item.status !== 'success' && item.statusText === 'loading metadata') {
+          item.statusText = 'waiting';
+          item.progress = 0;
+          updatedItems.push(item.id);
+        }
+      }
+    }
+
+    // Update items in current chunk
+    if (data.file_paths && Array.isArray(data.file_paths)) {
+      for (const filePath of data.file_paths) {
+        const item = state.findItemByPath(filePath);
+
+        if (item) {
+          switch (data.phase) {
+            case 'uploading':
+            case 'uploading_compressed':
+              item.statusText = 'uploading';
+              item.progress = 0;
+              updatedItems.push(item.id);
+              break;
+            case 'group_start':
+              if (item.status !== 'success' && item.statusText !== 'waiting') {
+                item.statusText = 'waiting';
+                updatedItems.push(item.id);
+              }
+              break;
+          }
+        }
+      }
+    }
+
+    // Apply lightweight UI updates for changed items
+    for (const itemId of updatedItems) {
+      state.updateQueueItemProgress(itemId);
+    }
+
+    // Update main progress summary for group events
+    if (data.phase === 'group_start' && data.total_groups) {
+      const progressText = document.getElementById('progressText');
+      if (progressText) {
+        progressText.textContent = `Processing group ${(data.group_index || 0) + 1} of ${data.total_groups}...`;
+      }
+    }
   });
 
   // Listen for system tray events
@@ -1487,16 +1768,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   ModalManager.openModal('metadataEditorModal');
   });
 
-  // Listen for system tray VRChat folder open request
+  // System tray VRChat folder
   listen('open-vrchat-folder-request', async () => {
     console.log('Tray: Open VRChat folder requested');
     try {
       if (selectedVRChatFolder) {
-        // Folder already selected - open it without showing the window
+        // Open selected folder
         await invoke('shell_open', { path: selectedVRChatFolder });
         state.showSuccess(`Opened VRChat folder: ${selectedVRChatFolder}`);
       } else {
-        // No folder selected - show window and dialog
+        // No folder - show dialog
         try {
           await appWindow.show();
           await appWindow.setFocus();
@@ -1629,11 +1910,61 @@ document.addEventListener('DOMContentLoaded', async () => {
   const webhookSelect = document.getElementById('webhookSelect') as HTMLSelectElement;
   webhookSelect.addEventListener('change', (e) => {
     const target = e.target as HTMLSelectElement;
-    state.selectedWebhookId = target.value ? parseInt(target.value) : null;
+    const newWebhookId = target.value ? parseInt(target.value) : null;
+
+    // Reset upload statuses
+    if (newWebhookId !== state.selectedWebhookId && state.getAllQueueItems().length > 0) {
+      state.resetUploadStatuses();
+    }
+
+    state.selectedWebhookId = newWebhookId;
     state.updateControlButtons();
   });
 
   state.updateExistingWebhooksDropdown();
+
+  // Grouping options toggle
+  const groupByMetadata = document.getElementById('groupByMetadata') as HTMLInputElement;
+  const groupingSubOptions = document.getElementById('groupingSubOptions');
+  const groupByTime = document.getElementById('groupByTime') as HTMLInputElement;
+  const timeWindowOptions = document.getElementById('timeWindowOptions');
+
+  // Toggle grouping sub-options
+  groupByMetadata?.addEventListener('change', () => {
+    if (groupByMetadata.checked) {
+      groupingSubOptions?.classList.remove('hidden');
+    } else {
+      groupingSubOptions?.classList.add('hidden');
+    }
+  });
+
+  // Toggle time window options
+  groupByTime?.addEventListener('change', () => {
+    if (groupByTime.checked) {
+      timeWindowOptions?.classList.remove('hidden');
+    } else {
+      timeWindowOptions?.classList.add('hidden');
+    }
+  });
+
+  // Time window preset toggle
+  const timePreset = document.getElementById('groupingTimeWindowPreset') as HTMLSelectElement;
+  const timeInput = document.getElementById('groupingTimeWindow') as HTMLInputElement;
+  const timeInputSuffix = document.getElementById('timeInputSuffix');
+
+  timePreset?.addEventListener('change', () => {
+    if (timePreset.value === 'custom') {
+      timeInput?.classList.remove('hidden');
+      timeInputSuffix?.classList.remove('hidden');
+      timeInput?.focus();
+    } else {
+      timeInput?.classList.add('hidden');
+      timeInputSuffix?.classList.add('hidden');
+      if (timeInput) {
+        timeInput.value = timePreset.value;
+      }
+    }
+  });
 
   // Manage webhooks button
   const manageWebhooksBtn = document.getElementById('manageWebhooksBtn');
@@ -1841,7 +2172,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   selectAllBtn?.addEventListener('click', () => state.selectAllItems());
 
   const deselectAllBtn = document.getElementById('deselectAllBtn');
-    const selectedIds = state.getSelectedItemIds();
+  deselectAllBtn?.addEventListener('click', () => state.deselectAllItems());
 
   const removeSelectedBtn = document.getElementById('removeSelectedBtn');
   removeSelectedBtn?.addEventListener('click', () => {
@@ -1866,10 +2197,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   const retryFailedBtn = document.getElementById('retryFailed');
   retryFailedBtn?.addEventListener('click', () => state.retryFailedUploads());
 
-  // FIXED PAUSE BUTTON EVENT LISTENER
+  // Cancel button
   const pauseUploadBtn = document.getElementById('pauseUpload');
   if (pauseUploadBtn) {
-    // Remove any existing listeners by cloning the node
+    // Clone to remove old listeners
     const newPauseBtn = pauseUploadBtn.cloneNode(true) as HTMLButtonElement;
     pauseUploadBtn.parentNode?.replaceChild(newPauseBtn, pauseUploadBtn);
     
@@ -1885,15 +2216,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         // Button will be hidden by resetUploadState, but just in case:
         newPauseBtn.disabled = false;
-        newPauseBtn.textContent = '⏸️ Pause';
-        
+        newPauseBtn.textContent = '⏹️ Stop';
+
       } catch (error) {
         console.error('Error stopping upload:', error);
         state.showError(`Failed to stop upload: ${error}`);
-        
+
         // Re-enable button on error
         newPauseBtn.disabled = false;
-        newPauseBtn.textContent = '⏸️ Pause';
+        newPauseBtn.textContent = '⏹️ Stop';
       }
     });
   }

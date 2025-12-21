@@ -402,7 +402,7 @@ pub async fn record_upload(
     Ok(())
 }
 
-// Upload session management
+/// Upload session management
 pub async fn create_upload_session(
     session_id: String,
     webhook_id: i64,

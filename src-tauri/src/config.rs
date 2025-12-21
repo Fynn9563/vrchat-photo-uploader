@@ -211,7 +211,7 @@ pub fn validate_config(config: &Config) -> AppResult<()> {
     Ok(())
 }
 
-// Configuration migration for version updates
+/// Config migration for version updates
 pub fn migrate_config() -> AppResult<()> {
     let config_path = get_config_path()?;
 
@@ -242,7 +242,7 @@ pub fn migrate_config() -> AppResult<()> {
     Ok(())
 }
 
-// Auto-cleanup functionality
+/// Auto-cleanup old data
 pub async fn auto_cleanup() -> AppResult<()> {
     let config = load_config()?;
     let cleanup_days = Config::from(config).auto_cleanup_days as i32;

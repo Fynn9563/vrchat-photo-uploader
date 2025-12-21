@@ -668,17 +668,68 @@ pub fn get_timestamp_from_filename(file_path: &str) -> Option<i64> {
     None
 }
 
-// Utility function to validate image dimensions
+/// Get image dimensions and file size
 pub fn get_image_info(file_path: &str) -> AppResult<(u32, u32, u64)> {
     InputValidator::validate_image_file(file_path)?;
 
-    let img = image::open(file_path)?;
     let file_size = FileSystemGuard::get_file_size(file_path)?;
 
-    Ok((img.width(), img.height(), file_size))
+    // Read only the image header for dimensions
+    let reader = image::io::Reader::open(file_path)?
+        .with_guessed_format()?;
+
+    let dimensions = reader.into_dimensions()?;
+
+    Ok((dimensions.0, dimensions.1, file_size))
 }
 
-// Function to check if image needs compression based on Discord limits
+/// Generate thumbnail for UI display
+pub fn generate_thumbnail(file_path: &str, max_dimension: u32) -> AppResult<String> {
+    InputValidator::validate_image_file(file_path)?;
+
+    log::debug!(
+        "Generating thumbnail for {} with max dimension {}",
+        file_path,
+        max_dimension
+    );
+
+    // Load the image
+    let img = image::open(file_path)?;
+
+    // Resize to thumbnail using thumbnail method
+    let thumbnail = img.thumbnail(max_dimension, max_dimension);
+
+    log::debug!(
+        "Resized from {}x{} to {}x{}",
+        img.width(),
+        img.height(),
+        thumbnail.width(),
+        thumbnail.height()
+    );
+
+    // Create output path in secure temp directory
+    let temp_path = FileSystemGuard::create_secure_temp_file(file_path)?;
+    let output_path = temp_path.with_extension("thumb.jpg");
+
+    // Convert to JPEG
+    let mut output = Vec::new();
+    let mut cursor = Cursor::new(&mut output);
+    thumbnail.write_to(&mut cursor, ImageOutputFormat::Jpeg(60))?;
+
+    fs::write(&output_path, output)?;
+
+    log::info!(
+        "Generated thumbnail for {} at {} ({}x{})",
+        file_path,
+        output_path.display(),
+        thumbnail.width(),
+        thumbnail.height()
+    );
+
+    Ok(output_path.to_string_lossy().to_string())
+}
+
+/// Check if image needs compression for Discord
 pub fn should_compress_image(file_path: &str) -> AppResult<bool> {
     let file_size = FileSystemGuard::get_file_size(file_path)?;
     const DISCORD_LIMIT: u64 = 50 * 1024 * 1024; // 50MB
