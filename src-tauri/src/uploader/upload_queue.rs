@@ -113,7 +113,8 @@ pub async fn process_upload_queue(
             valid_files,
             grouping_time_window,
             group_by_world,
-        ).await
+        )
+        .await
     } else {
         super::image_groups::create_individual_groups_with_metadata(valid_files).await
     };
@@ -351,7 +352,10 @@ async fn process_image_group_with_failure_handling(
         let mut text_fields_for_images = text_fields.clone();
         if first_message && !overflow_messages.is_empty() {
             // Send the main text message first (this creates the forum thread if applicable)
-            log::info!("📤 Sending text message first (has {} overflow messages)", overflow_messages.len());
+            log::info!(
+                "📤 Sending text message first (has {} overflow messages)",
+                overflow_messages.len()
+            );
 
             let main_content = text_fields.get("content").cloned().unwrap_or_default();
 
@@ -360,24 +364,29 @@ async fn process_image_group_with_failure_handling(
                 let thread_name = text_fields.get("thread_name").cloned();
 
                 // Send as text with thread_name to create the thread
-                match client.send_forum_text_message(
-                    &webhook.url,
-                    &main_content,
-                    thread_name.as_deref(),
-                ).await {
+                match client
+                    .send_forum_text_message(&webhook.url, &main_content, thread_name.as_deref())
+                    .await
+                {
                     Ok(response_data) => {
                         // Extract thread_id from response
                         if let Some(extracted_thread_id) = extract_thread_id(&response_data) {
                             thread_id = Some(extracted_thread_id.clone());
-                            log::info!("✅ Forum thread created with thread_id: {}", extracted_thread_id);
+                            log::info!(
+                                "✅ Forum thread created with thread_id: {}",
+                                extracted_thread_id
+                            );
 
                             // Send overflow messages to the thread
                             for (i, overflow_msg) in overflow_messages.iter().enumerate() {
-                                if let Err(e) = client.send_text_message(
-                                    &webhook.url,
-                                    overflow_msg,
-                                    Some(&extracted_thread_id),
-                                ).await {
+                                if let Err(e) = client
+                                    .send_text_message(
+                                        &webhook.url,
+                                        overflow_msg,
+                                        Some(&extracted_thread_id),
+                                    )
+                                    .await
+                                {
                                     log::warn!("Failed to send overflow message {}: {}", i + 1, e);
                                 }
                             }
@@ -406,20 +415,18 @@ async fn process_image_group_with_failure_handling(
                 text_fields_for_images.clear();
             } else {
                 // Non-forum channel: send text first, then overflow, then images
-                if let Err(e) = client.send_text_message(
-                    &webhook.url,
-                    &main_content,
-                    thread_id.as_deref(),
-                ).await {
+                if let Err(e) = client
+                    .send_text_message(&webhook.url, &main_content, thread_id.as_deref())
+                    .await
+                {
                     log::warn!("Failed to send initial text message: {}", e);
                 } else {
                     // Send overflow messages
                     for (i, overflow_msg) in overflow_messages.iter().enumerate() {
-                        if let Err(e) = client.send_text_message(
-                            &webhook.url,
-                            overflow_msg,
-                            thread_id.as_deref(),
-                        ).await {
+                        if let Err(e) = client
+                            .send_text_message(&webhook.url, overflow_msg, thread_id.as_deref())
+                            .await
+                        {
                             log::warn!("Failed to send overflow message {}: {}", i + 1, e);
                         }
                     }
@@ -881,9 +888,7 @@ fn split_into_size_chunks(file_paths: &[String]) -> Vec<Vec<String>> {
     let mut current_size: u64 = 0;
 
     for path in file_paths {
-        let file_size = std::fs::metadata(path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
         // If single file exceeds limit, put it alone in a chunk
         if file_size > SAFE_CHUNK_SIZE_BYTES {
@@ -993,11 +998,7 @@ async fn upload_compressed_chunk_with_thread_id(
                 // Log compressed file size
                 if let Ok(metadata) = std::fs::metadata(&compressed_path) {
                     let size_mb = metadata.len() as f64 / 1024.0 / 1024.0;
-                    log::info!(
-                        "  📷 {} -> {:.2} MB",
-                        filename,
-                        size_mb
-                    );
+                    log::info!("  📷 {} -> {:.2} MB", filename, size_mb);
                 }
                 compressed_paths.push(compressed_path.clone());
                 cleanup_paths.push(compressed_path.clone());
@@ -1095,9 +1096,7 @@ async fn upload_compressed_chunk_with_thread_id(
     let final_result = match result {
         Ok(response) => Ok(response),
         Err(e) if e.to_string().contains("413") || e.to_string().contains("Payload Too Large") => {
-            log::info!(
-                "📦 Compressed upload still too large, splitting into size-based chunks..."
-            );
+            log::info!("📦 Compressed upload still too large, splitting into size-based chunks...");
 
             // Split compressed files into size-based chunks
             let chunks = split_into_size_chunks(&compressed_paths);
@@ -1170,7 +1169,11 @@ async fn upload_compressed_chunk_with_thread_id(
                 match chunk_result {
                     Ok(response) => {
                         last_response = response;
-                        log::info!("✅ Chunk {}/{} uploaded successfully", chunk_idx + 1, chunks.len());
+                        log::info!(
+                            "✅ Chunk {}/{} uploaded successfully",
+                            chunk_idx + 1,
+                            chunks.len()
+                        );
                     }
                     Err(chunk_err) => {
                         log::error!(

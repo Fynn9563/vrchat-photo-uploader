@@ -423,9 +423,9 @@ pub async fn get_image_info_batch(
     file_paths: Vec<String>,
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<(String, Option<(u32, u32, u64)>)>, String> {
-    use tokio::sync::Semaphore;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
 
     let total = file_paths.len();
     let completed = Arc::new(AtomicUsize::new(0));
@@ -458,11 +458,16 @@ pub async fn get_image_info_batch(
                 });
 
                 let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
-                app_handle.emit_all("file-processing-progress", serde_json::json!({
-                    "phase": "reading",
-                    "completed": done,
-                    "total": total
-                })).ok();
+                app_handle
+                    .emit_all(
+                        "file-processing-progress",
+                        serde_json::json!({
+                            "phase": "reading",
+                            "completed": done,
+                            "total": total
+                        }),
+                    )
+                    .ok();
 
                 result
             })
@@ -504,9 +509,9 @@ pub async fn generate_thumbnails_batch(
     file_paths: Vec<String>,
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<(String, Option<String>)>, String> {
-    use tokio::sync::Semaphore;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
 
     let total = file_paths.len();
     let completed = Arc::new(AtomicUsize::new(0));
@@ -539,11 +544,16 @@ pub async fn generate_thumbnails_batch(
                 });
 
                 let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
-                app_handle.emit_all("file-processing-progress", serde_json::json!({
-                    "phase": "thumbnails",
-                    "completed": done,
-                    "total": total
-                })).ok();
+                app_handle
+                    .emit_all(
+                        "file-processing-progress",
+                        serde_json::json!({
+                            "phase": "thumbnails",
+                            "completed": done,
+                            "total": total
+                        }),
+                    )
+                    .ok();
 
                 result
             })

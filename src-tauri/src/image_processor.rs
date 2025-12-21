@@ -675,8 +675,7 @@ pub fn get_image_info(file_path: &str) -> AppResult<(u32, u32, u64)> {
     let file_size = FileSystemGuard::get_file_size(file_path)?;
 
     // Read only the image header for dimensions
-    let reader = image::io::Reader::open(file_path)?
-        .with_guessed_format()?;
+    let reader = image::io::Reader::open(file_path)?.with_guessed_format()?;
 
     let dimensions = reader.into_dimensions()?;
 

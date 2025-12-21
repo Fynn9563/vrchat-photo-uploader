@@ -214,7 +214,10 @@ impl DiscordClient {
             }
 
             return Err(AppError::UploadFailed {
-                reason: format!("Failed to send forum text message: {} - {}", status, error_text),
+                reason: format!(
+                    "Failed to send forum text message: {} - {}",
+                    status, error_text
+                ),
             });
         }
     }

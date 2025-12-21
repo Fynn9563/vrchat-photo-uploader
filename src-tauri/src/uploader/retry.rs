@@ -24,22 +24,42 @@ pub async fn retry_single_upload(
     let client = DiscordClient::new();
 
     if let Err(e) = security::InputValidator::validate_image_file(&file_path) {
-        update_progress_failure(&progress_state, &session_id, file_path, e.to_string(), false);
+        update_progress_failure(
+            &progress_state,
+            &session_id,
+            file_path,
+            e.to_string(),
+            false,
+        );
         return;
     }
 
     update_progress_current(&progress_state, &session_id, file_path.clone());
 
-    let metadata = image_processor::extract_metadata(&file_path).await.ok().flatten();
+    let metadata = image_processor::extract_metadata(&file_path)
+        .await
+        .ok()
+        .flatten();
     let timestamp = image_processor::get_timestamp_from_filename(&file_path);
-    let all_players = metadata.as_ref().map(|m| m.players.clone()).unwrap_or_default();
-    let all_worlds = metadata.as_ref()
+    let all_players = metadata
+        .as_ref()
+        .map(|m| m.players.clone())
+        .unwrap_or_default();
+    let all_worlds = metadata
+        .as_ref()
         .and_then(|m| m.world.clone())
         .map(|w| vec![w])
         .unwrap_or_default();
 
     let (text_fields, player_messages) = create_discord_payload(
-        &all_worlds, &all_players, timestamp, true, 0, webhook.is_forum, None, true
+        &all_worlds,
+        &all_players,
+        timestamp,
+        true,
+        0,
+        webhook.is_forum,
+        None,
+        true,
     );
 
     let dummy_progress_state = Arc::new(Mutex::new(HashMap::new()));
@@ -67,11 +87,10 @@ pub async fn retry_single_upload(
                 };
 
                 for (i, player_msg) in player_messages.iter().enumerate() {
-                    if let Err(e) = client.send_text_message(
-                        &webhook.url,
-                        player_msg,
-                        thread_id.as_deref(),
-                    ).await {
+                    if let Err(e) = client
+                        .send_text_message(&webhook.url, player_msg, thread_id.as_deref())
+                        .await
+                    {
                         log::warn!("Failed to send player message {}: {}", i + 1, e);
                     }
                 }
@@ -90,8 +109,15 @@ pub async fn retry_single_upload(
 
             tokio::spawn(async move {
                 let _ = database::record_upload(
-                    file_path_for_db, file_name, file_hash, file_size, webhook_id, "success", None,
-                ).await;
+                    file_path_for_db,
+                    file_name,
+                    file_hash,
+                    file_size,
+                    webhook_id,
+                    "success",
+                    None,
+                )
+                .await;
             });
 
             update_progress_success(&progress_state, &session_id, file_path.clone());
@@ -110,11 +136,24 @@ pub async fn retry_single_upload(
 
             tokio::spawn(async move {
                 let _ = database::record_upload(
-                    file_path_for_db, file_name, None, None, webhook_id, "failed", Some(error_message),
-                ).await;
+                    file_path_for_db,
+                    file_name,
+                    None,
+                    None,
+                    webhook_id,
+                    "failed",
+                    Some(error_message),
+                )
+                .await;
             });
 
-            update_progress_failure(&progress_state, &session_id, file_path.clone(), e.to_string(), is_retryable);
+            update_progress_failure(
+                &progress_state,
+                &session_id,
+                file_path.clone(),
+                e.to_string(),
+                is_retryable,
+            );
             log::error!("Retry failed for {}: {}", file_path, e);
         }
     }

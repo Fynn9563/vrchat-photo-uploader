@@ -20,7 +20,11 @@ pub async fn group_images_by_metadata(
 ) -> Vec<ImageGroup> {
     let mut image_data: Vec<(String, Option<ImageMetadata>, Option<i64>, String)> = Vec::new();
     let no_time_limit = time_window_minutes == 0;
-    let time_window_seconds = if no_time_limit { 1 } else { (time_window_minutes as i64) * 60 };
+    let time_window_seconds = if no_time_limit {
+        1
+    } else {
+        (time_window_minutes as i64) * 60
+    };
 
     // Extract metadata and compute group keys
     for file_path in file_paths {
@@ -32,7 +36,13 @@ pub async fn group_images_by_metadata(
         let timestamp = image_processor::get_timestamp_from_filename(&file_path);
 
         let group_key = if let Some(ref meta) = metadata {
-            create_metadata_key(meta, timestamp, time_window_seconds, no_time_limit, group_by_world)
+            create_metadata_key(
+                meta,
+                timestamp,
+                time_window_seconds,
+                no_time_limit,
+                group_by_world,
+            )
         } else if no_time_limit {
             "unknown_all".to_string()
         } else if let Some(ts) = timestamp {
@@ -54,23 +64,29 @@ pub async fn group_images_by_metadata(
             // Merge players using ID as key to avoid duplicates
             let player_map = group_players.entry(group_key.clone()).or_default();
             for player in &meta.players {
-                player_map.entry(player.id.clone()).or_insert_with(|| player.clone());
+                player_map
+                    .entry(player.id.clone())
+                    .or_insert_with(|| player.clone());
             }
 
             // Merge worlds using ID as key to avoid duplicates
             if let Some(ref world) = meta.world {
                 let world_map = group_worlds.entry(group_key.clone()).or_default();
-                world_map.entry(world.id.clone()).or_insert_with(|| world.clone());
+                world_map
+                    .entry(world.id.clone())
+                    .or_insert_with(|| world.clone());
             }
         }
 
-        let group = groups.entry(group_key.clone()).or_insert_with(|| ImageGroup {
-            images: Vec::new(),
-            timestamp,
-            group_id: group_key.clone(),
-            all_players: Vec::new(),
-            all_worlds: Vec::new(),
-        });
+        let group = groups
+            .entry(group_key.clone())
+            .or_insert_with(|| ImageGroup {
+                images: Vec::new(),
+                timestamp,
+                group_id: group_key.clone(),
+                all_players: Vec::new(),
+                all_worlds: Vec::new(),
+            });
 
         group.images.push(file_path);
     }
@@ -79,7 +95,9 @@ pub async fn group_images_by_metadata(
     for (group_key, group) in groups.iter_mut() {
         if let Some(player_map) = group_players.get(group_key) {
             group.all_players = player_map.values().cloned().collect();
-            group.all_players.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+            group
+                .all_players
+                .sort_by(|a, b| a.display_name.cmp(&b.display_name));
         }
         if let Some(world_map) = group_worlds.get(group_key) {
             group.all_worlds = world_map.values().cloned().collect();
@@ -110,8 +128,12 @@ pub async fn create_individual_groups_with_metadata(file_paths: Vec<String>) -> 
             .ok()
             .flatten();
         let timestamp = image_processor::get_timestamp_from_filename(&file_path);
-        let all_players = metadata.as_ref().map(|m| m.players.clone()).unwrap_or_default();
-        let all_worlds = metadata.as_ref()
+        let all_players = metadata
+            .as_ref()
+            .map(|m| m.players.clone())
+            .unwrap_or_default();
+        let all_worlds = metadata
+            .as_ref()
             .and_then(|m| m.world.clone())
             .map(|w| vec![w])
             .unwrap_or_default();
@@ -122,7 +144,10 @@ pub async fn create_individual_groups_with_metadata(file_paths: Vec<String>) -> 
             group_id: format!(
                 "individual_{}_{}",
                 i,
-                Path::new(&file_path).file_name().unwrap_or_default().to_string_lossy()
+                Path::new(&file_path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
             ),
             all_players,
             all_worlds,
@@ -141,7 +166,11 @@ fn create_metadata_key(
     group_by_world: bool,
 ) -> String {
     let world_part = if group_by_world {
-        metadata.world.as_ref().map(|w| w.id.clone()).unwrap_or_else(|| "unknown".to_string())
+        metadata
+            .world
+            .as_ref()
+            .map(|w| w.id.clone())
+            .unwrap_or_else(|| "unknown".to_string())
     } else {
         "any_world".to_string()
     };
@@ -149,7 +178,11 @@ fn create_metadata_key(
     if no_time_limit {
         format!("{}_all", world_part)
     } else {
-        format!("{}_t{}", world_part, timestamp.unwrap_or(0) / time_window_seconds)
+        format!(
+            "{}_t{}",
+            world_part,
+            timestamp.unwrap_or(0) / time_window_seconds
+        )
     }
 }
 
@@ -173,7 +206,7 @@ pub fn create_discord_payload(
             all_worlds,
             all_players,
             timestamp,
-            include_player_names
+            include_player_names,
         );
         payload.insert("content".to_string(), content);
 
@@ -184,7 +217,8 @@ pub fn create_discord_payload(
 
         // Create overflow messages for remaining players
         if !remaining_players.is_empty() {
-            overflow_messages = create_overflow_player_messages(&remaining_players, had_players_in_main);
+            overflow_messages =
+                create_overflow_player_messages(&remaining_players, had_players_in_main);
         }
     } else if chunk_index > 0 {
         // No text for continuation chunks - just upload the images silently
@@ -200,7 +234,7 @@ fn create_message_content_with_players(
     timestamp: Option<i64>,
     include_player_names: bool,
 ) -> (String, Vec<PlayerInfo>, bool) {
-    const MAX_LENGTH: usize = 1900; // Leave buffer for Discord's 2000 char limit
+    const MAX_LENGTH: usize = 1900;
     let mut content = String::new();
     let mut remaining_players: Vec<PlayerInfo> = Vec::new();
     let mut had_players_in_main = false;
@@ -213,7 +247,10 @@ fn create_message_content_with_players(
             .map(|world| {
                 let vrchat_link = format!("https://vrchat.com/home/launch?worldId={}", world.id);
                 let vrcx_link = format!("https://vrcx.azurewebsites.net/world/{}", world.id);
-                format!("**{}** ([VRChat](<{}>), [VRCX](<{}>))", world.name, vrchat_link, vrcx_link)
+                format!(
+                    "**{}** ([VRChat](<{}>), [VRCX](<{}>))",
+                    world.name, vrchat_link, vrcx_link
+                )
             })
             .collect();
 
@@ -244,8 +281,11 @@ fn create_message_content_with_players(
                         remaining_players = all_players[players_added..].to_vec();
                         // End with comma to indicate continuation
                         content.push(',');
-                        log::info!("First message has {} players, {} overflow to next message(s)",
-                            players_added, remaining_players.len());
+                        log::info!(
+                            "First message has {} players, {} overflow to next message(s)",
+                            players_added,
+                            remaining_players.len()
+                        );
                         break;
                     }
                     content.push_str(&addition);
@@ -254,7 +294,10 @@ fn create_message_content_with_players(
             } else {
                 // Can't fit any players, all go to overflow
                 remaining_players = all_players.to_vec();
-                log::info!("No players fit in first message, all {} go to overflow", remaining_players.len());
+                log::info!(
+                    "No players fit in first message, all {} go to overflow",
+                    remaining_players.len()
+                );
             }
         }
     } else {
@@ -270,7 +313,10 @@ fn create_message_content_with_players(
 }
 
 /// Creates overflow messages for remaining players
-fn create_overflow_player_messages(remaining_players: &[PlayerInfo], had_players_in_main: bool) -> Vec<String> {
+fn create_overflow_player_messages(
+    remaining_players: &[PlayerInfo],
+    had_players_in_main: bool,
+) -> Vec<String> {
     const MAX_LENGTH: usize = 1900; // Leave buffer for Discord's 2000 char limit
     let mut messages = Vec::new();
 
@@ -302,8 +348,11 @@ fn create_overflow_player_messages(remaining_players: &[PlayerInfo], had_players
         messages.push(current);
     }
 
-    log::info!("Created {} overflow message(s) for {} remaining players",
-        messages.len(), remaining_players.len());
+    log::info!(
+        "Created {} overflow message(s) for {} remaining players",
+        messages.len(),
+        remaining_players.len()
+    );
     messages
 }
 
