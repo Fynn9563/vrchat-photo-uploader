@@ -1,6 +1,6 @@
 [package]
 name = "VRChat-Photo-Uploader"
-version = "3.0.0"
+version = "3.0.1"
 description = "A powerful tool for uploading VRChat photos to Discord"
 authors = ["Fynn9563"]
 repository = "https://github.com/fynn9563/vrchat-photo-uploader"
