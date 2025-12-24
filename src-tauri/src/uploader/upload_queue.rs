@@ -399,18 +399,29 @@ async fn process_image_group_with_failure_handling(
                     Err(e) => {
                         let error_str = e.to_string();
                         // Check if it's a "message too long" error
-                        if error_str.contains("400") && (error_str.contains("2000") || error_str.contains("fewer in length")) {
+                        if error_str.contains("400")
+                            && (error_str.contains("2000") || error_str.contains("fewer in length"))
+                        {
                             log::warn!("Forum message too long ({}), retrying with worlds separate from players...", main_content.len());
 
                             // Retry 1: Send worlds in one message (no players), players in separate message(s)
-                            let worlds_only_msg = super::image_groups::create_worlds_only_message(&group.all_worlds, group.timestamp);
+                            let worlds_only_msg = super::image_groups::create_worlds_only_message(
+                                &group.all_worlds,
+                                group.timestamp,
+                            );
 
                             match client
-                                .send_forum_text_message(&webhook.url, &worlds_only_msg, thread_name.as_deref())
+                                .send_forum_text_message(
+                                    &webhook.url,
+                                    &worlds_only_msg,
+                                    thread_name.as_deref(),
+                                )
                                 .await
                             {
                                 Ok(response_data) => {
-                                    if let Some(extracted_thread_id) = extract_thread_id(&response_data) {
+                                    if let Some(extracted_thread_id) =
+                                        extract_thread_id(&response_data)
+                                    {
                                         thread_id = Some(extracted_thread_id.clone());
                                         log::info!(
                                             "✅ Forum thread created with worlds-only message, thread_id: {}",
@@ -419,8 +430,13 @@ async fn process_image_group_with_failure_handling(
 
                                         // Send player messages to the thread
                                         if include_player_names && !group.all_players.is_empty() {
-                                            let player_messages = super::image_groups::create_split_player_messages(&group.all_players);
-                                            for (i, player_msg) in player_messages.iter().enumerate() {
+                                            let player_messages =
+                                                super::image_groups::create_split_player_messages(
+                                                    &group.all_players,
+                                                );
+                                            for (i, player_msg) in
+                                                player_messages.iter().enumerate()
+                                            {
                                                 if let Err(e3) = client
                                                     .send_text_message(
                                                         &webhook.url,
@@ -429,29 +445,47 @@ async fn process_image_group_with_failure_handling(
                                                     )
                                                     .await
                                                 {
-                                                    log::warn!("Failed to send player message {}: {}", i + 1, e3);
+                                                    log::warn!(
+                                                        "Failed to send player message {}: {}",
+                                                        i + 1,
+                                                        e3
+                                                    );
                                                 }
                                             }
                                         }
                                     } else {
-                                        log::error!("Failed to extract thread_id from forum response");
+                                        log::error!(
+                                            "Failed to extract thread_id from forum response"
+                                        );
                                     }
                                 }
                                 Err(e2) => {
                                     let e2_str = e2.to_string();
-                                    if e2_str.contains("400") && (e2_str.contains("2000") || e2_str.contains("fewer in length")) {
+                                    if e2_str.contains("400")
+                                        && (e2_str.contains("2000")
+                                            || e2_str.contains("fewer in length"))
+                                    {
                                         log::warn!("Worlds-only message still too long, using compact format...");
 
                                         // Retry 2: Use compact world format (summary + separate link messages)
-                                        let (summary_msg, link_messages) = super::image_groups::create_compact_world_messages(&group.all_worlds);
+                                        let (summary_msg, link_messages) =
+                                            super::image_groups::create_compact_world_messages(
+                                                &group.all_worlds,
+                                            );
 
                                         // Create thread with summary message
                                         match client
-                                            .send_forum_text_message(&webhook.url, &summary_msg, thread_name.as_deref())
+                                            .send_forum_text_message(
+                                                &webhook.url,
+                                                &summary_msg,
+                                                thread_name.as_deref(),
+                                            )
                                             .await
                                         {
                                             Ok(response_data) => {
-                                                if let Some(extracted_thread_id) = extract_thread_id(&response_data) {
+                                                if let Some(extracted_thread_id) =
+                                                    extract_thread_id(&response_data)
+                                                {
                                                     thread_id = Some(extracted_thread_id.clone());
                                                     log::info!(
                                                         "✅ Forum thread created with world summary, thread_id: {}",
@@ -459,7 +493,9 @@ async fn process_image_group_with_failure_handling(
                                                     );
 
                                                     // Send link messages
-                                                    for (i, link_msg) in link_messages.iter().enumerate() {
+                                                    for (i, link_msg) in
+                                                        link_messages.iter().enumerate()
+                                                    {
                                                         if let Err(e3) = client
                                                             .send_text_message(
                                                                 &webhook.url,
@@ -473,9 +509,13 @@ async fn process_image_group_with_failure_handling(
                                                     }
 
                                                     // Send player messages
-                                                    if include_player_names && !group.all_players.is_empty() {
+                                                    if include_player_names
+                                                        && !group.all_players.is_empty()
+                                                    {
                                                         let player_messages = super::image_groups::create_split_player_messages(&group.all_players);
-                                                        for (i, player_msg) in player_messages.iter().enumerate() {
+                                                        for (i, player_msg) in
+                                                            player_messages.iter().enumerate()
+                                                        {
                                                             if let Err(e3) = client
                                                                 .send_text_message(
                                                                     &webhook.url,
@@ -501,7 +541,10 @@ async fn process_image_group_with_failure_handling(
                                                         progress_state,
                                                         session_id,
                                                         file_path.clone(),
-                                                        format!("Failed to create forum thread: {}", e3),
+                                                        format!(
+                                                            "Failed to create forum thread: {}",
+                                                            e3
+                                                        ),
                                                         true,
                                                         group.group_id.clone(),
                                                     );
@@ -510,7 +553,10 @@ async fn process_image_group_with_failure_handling(
                                             }
                                         }
                                     } else {
-                                        log::error!("Failed to send forum worlds-only message: {}", e2);
+                                        log::error!(
+                                            "Failed to send forum worlds-only message: {}",
+                                            e2
+                                        );
                                         for file_path in chunk.iter() {
                                             update_progress_group_failure(
                                                 progress_state,
@@ -567,72 +613,131 @@ async fn process_image_group_with_failure_handling(
                     Err(e) => {
                         let error_str = e.to_string();
                         // Check if it's a "message too long" error (400 with content length message)
-                        if error_str.contains("400") && (error_str.contains("2000") || error_str.contains("fewer in length")) {
+                        if error_str.contains("400")
+                            && (error_str.contains("2000") || error_str.contains("fewer in length"))
+                        {
                             log::warn!("Initial message too long ({}), retrying with worlds separate from players...", main_content.len());
 
                             // Retry 1: Send worlds in one message, players in separate message(s)
-                            let worlds_only_msg = super::image_groups::create_worlds_only_message(&group.all_worlds, group.timestamp);
+                            let worlds_only_msg = super::image_groups::create_worlds_only_message(
+                                &group.all_worlds,
+                                group.timestamp,
+                            );
 
                             let worlds_result = client
-                                .send_text_message(&webhook.url, &worlds_only_msg, thread_id.as_deref())
+                                .send_text_message(
+                                    &webhook.url,
+                                    &worlds_only_msg,
+                                    thread_id.as_deref(),
+                                )
                                 .await;
 
                             match worlds_result {
                                 Ok(_) => {
-                                    log::info!("✅ Sent worlds-only message, now sending players...");
+                                    log::info!(
+                                        "✅ Sent worlds-only message, now sending players..."
+                                    );
                                     // Send player messages
                                     if include_player_names && !group.all_players.is_empty() {
-                                        let player_messages = super::image_groups::create_split_player_messages(&group.all_players);
+                                        let player_messages =
+                                            super::image_groups::create_split_player_messages(
+                                                &group.all_players,
+                                            );
                                         for (i, player_msg) in player_messages.iter().enumerate() {
                                             if let Err(e3) = client
-                                                .send_text_message(&webhook.url, player_msg, thread_id.as_deref())
+                                                .send_text_message(
+                                                    &webhook.url,
+                                                    player_msg,
+                                                    thread_id.as_deref(),
+                                                )
                                                 .await
                                             {
-                                                log::warn!("Failed to send player message {}: {}", i + 1, e3);
+                                                log::warn!(
+                                                    "Failed to send player message {}: {}",
+                                                    i + 1,
+                                                    e3
+                                                );
                                             }
                                         }
                                     }
                                 }
                                 Err(e2) => {
                                     let e2_str = e2.to_string();
-                                    if e2_str.contains("400") && (e2_str.contains("2000") || e2_str.contains("fewer in length")) {
+                                    if e2_str.contains("400")
+                                        && (e2_str.contains("2000")
+                                            || e2_str.contains("fewer in length"))
+                                    {
                                         log::warn!("Worlds-only message still too long, using compact format...");
 
                                         // Retry 2: Use compact world format (summary + separate link messages)
-                                        let (summary_msg, link_messages) = super::image_groups::create_compact_world_messages(&group.all_worlds);
+                                        let (summary_msg, link_messages) =
+                                            super::image_groups::create_compact_world_messages(
+                                                &group.all_worlds,
+                                            );
 
                                         // Send summary message
                                         if let Err(e3) = client
-                                            .send_text_message(&webhook.url, &summary_msg, thread_id.as_deref())
+                                            .send_text_message(
+                                                &webhook.url,
+                                                &summary_msg,
+                                                thread_id.as_deref(),
+                                            )
                                             .await
                                         {
-                                            log::warn!("Failed to send world summary message: {}", e3);
+                                            log::warn!(
+                                                "Failed to send world summary message: {}",
+                                                e3
+                                            );
                                         }
 
                                         // Send link messages
                                         for (i, link_msg) in link_messages.iter().enumerate() {
                                             if let Err(e3) = client
-                                                .send_text_message(&webhook.url, link_msg, thread_id.as_deref())
+                                                .send_text_message(
+                                                    &webhook.url,
+                                                    link_msg,
+                                                    thread_id.as_deref(),
+                                                )
                                                 .await
                                             {
-                                                log::warn!("Failed to send world links message {}: {}", i + 1, e3);
+                                                log::warn!(
+                                                    "Failed to send world links message {}: {}",
+                                                    i + 1,
+                                                    e3
+                                                );
                                             }
                                         }
 
                                         // Send player messages
                                         if include_player_names && !group.all_players.is_empty() {
-                                            let player_messages = super::image_groups::create_split_player_messages(&group.all_players);
-                                            for (i, player_msg) in player_messages.iter().enumerate() {
+                                            let player_messages =
+                                                super::image_groups::create_split_player_messages(
+                                                    &group.all_players,
+                                                );
+                                            for (i, player_msg) in
+                                                player_messages.iter().enumerate()
+                                            {
                                                 if let Err(e3) = client
-                                                    .send_text_message(&webhook.url, player_msg, thread_id.as_deref())
+                                                    .send_text_message(
+                                                        &webhook.url,
+                                                        player_msg,
+                                                        thread_id.as_deref(),
+                                                    )
                                                     .await
                                                 {
-                                                    log::warn!("Failed to send player message {}: {}", i + 1, e3);
+                                                    log::warn!(
+                                                        "Failed to send player message {}: {}",
+                                                        i + 1,
+                                                        e3
+                                                    );
                                                 }
                                             }
                                         }
 
-                                        log::info!("✅ Sent compact world summary and {} link message(s)", link_messages.len());
+                                        log::info!(
+                                            "✅ Sent compact world summary and {} link message(s)",
+                                            link_messages.len()
+                                        );
                                     } else {
                                         log::warn!("Failed to send worlds-only message: {}", e2);
                                     }
