@@ -198,6 +198,7 @@ fn main() {
             retry_failed_upload,
             retry_failed_group,
             get_image_metadata,
+            get_image_metadata_with_source,
             update_image_metadata,
             get_app_config,
             save_app_config,

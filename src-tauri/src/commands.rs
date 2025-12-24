@@ -387,6 +387,19 @@ pub async fn get_image_metadata(file_path: String) -> Result<Option<ImageMetadat
         .map_err(|e| e.to_string())
 }
 
+/// Get image metadata with information about its source (VRCX, VRChat XMP, or None)
+/// This is useful for the UI to show what type of metadata was found
+#[tauri::command]
+pub async fn get_image_metadata_with_source(
+    file_path: String,
+) -> Result<image_processor::MetadataWithSource, String> {
+    InputValidator::validate_image_file(&file_path)?;
+
+    image_processor::extract_metadata_with_source(&file_path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn update_image_metadata(
     file_path: String,

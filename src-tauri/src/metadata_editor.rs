@@ -6,6 +6,7 @@ use crate::commands::ImageMetadata;
 use crate::errors::{AppError, AppResult};
 use crate::security::InputValidator;
 
+/// Embed metadata into a PNG file using VRCX-style JSON format
 pub async fn embed_metadata(file_path: &str, metadata: ImageMetadata) -> AppResult<String> {
     // Validate input
     InputValidator::validate_image_file(file_path)?;
@@ -194,27 +195,58 @@ fn inject_png_metadata(png_data: &[u8], metadata_json: &str) -> AppResult<Vec<u8
         let chunk_type = &png_data[pos + 4..pos + 8];
         let chunk_type_str = std::str::from_utf8(chunk_type).unwrap_or("");
 
-        // Insert our metadata chunk after IHDR but before IDAT
+        // Insert our VRCX metadata chunk after IHDR but before IDAT
         if chunk_type_str == "IDAT" && !metadata_inserted {
             insert_text_chunk(&mut result, "Description", metadata_json)?;
             metadata_inserted = true;
         }
 
-        // Skip existing Description chunks to avoid duplicates
-        if (chunk_type_str == "tEXt" || chunk_type_str == "iTXt")
+        // Handle text chunks specially to preserve XMP but remove old VRCX Description
+        if (chunk_type_str == "tEXt" || chunk_type_str == "iTXt" || chunk_type_str == "zTXt")
             && pos + 8 + length <= png_data.len()
         {
             let chunk_data = &png_data[pos + 8..pos + 8 + length];
-            if let Ok(text) = std::str::from_utf8(chunk_data) {
-                if text.starts_with("Description\0") {
-                    // Skip this chunk
-                    pos += 12 + length;
-                    continue;
+
+            // Check if this is a Description chunk (VRCX-style metadata we want to replace)
+            let is_description_chunk =
+                if let Some(null_pos) = chunk_data.iter().position(|&b| b == 0) {
+                    if let Ok(keyword) = std::str::from_utf8(&chunk_data[..null_pos]) {
+                        keyword.eq_ignore_ascii_case("Description")
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+            // Check if this is an XMP chunk (VRChat native metadata - preserve it!)
+            let is_xmp_chunk = if let Some(null_pos) = chunk_data.iter().position(|&b| b == 0) {
+                if let Ok(keyword) = std::str::from_utf8(&chunk_data[..null_pos]) {
+                    keyword.contains("XMP")
+                        || keyword.contains("XML:com.adobe.xmp")
+                        || keyword.eq_ignore_ascii_case("xpacket")
+                } else {
+                    false
                 }
+            } else {
+                false
+            };
+
+            if is_description_chunk {
+                // Skip existing Description chunks - we'll add our new one
+                log::debug!("Removing existing VRCX Description chunk");
+                pos += 12 + length;
+                continue;
+            }
+
+            if is_xmp_chunk {
+                // Preserve XMP chunks (VRChat native metadata)
+                log::debug!("Preserving VRChat XMP metadata chunk");
+                // Fall through to copy the chunk
             }
         }
 
-        // Copy the original chunk
+        // Copy the original chunk (including XMP chunks which we want to preserve)
         let chunk_end = pos + 12 + length; // 4 length + 4 type + data + 4 CRC
         if chunk_end <= png_data.len() {
             result.extend_from_slice(&png_data[pos..chunk_end]);

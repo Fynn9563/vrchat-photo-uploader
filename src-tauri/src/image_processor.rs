@@ -10,6 +10,67 @@ use crate::commands::{AuthorInfo, ImageMetadata, PlayerInfo, WorldInfo};
 use crate::errors::{AppError, AppResult};
 use crate::security::{FileSystemGuard, InputValidator};
 
+/// Represents the source of extracted metadata
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub enum MetadataSource {
+    /// VRCX-style JSON metadata in PNG Description chunk
+    Vrcx,
+    /// VRChat native XMP metadata
+    VrchatXmp,
+    /// No metadata found
+    None,
+}
+
+/// Result of metadata extraction with source information
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MetadataWithSource {
+    pub metadata: Option<ImageMetadata>,
+    pub source: MetadataSource,
+}
+
+/// Extract metadata with information about its source
+pub async fn extract_metadata_with_source(file_path: &str) -> AppResult<MetadataWithSource> {
+    log::info!("Extracting metadata with source info for: {}", file_path);
+
+    // Validate input first
+    InputValidator::validate_image_file(file_path)?;
+
+    let _path = Path::new(file_path);
+    if !_path.exists() {
+        return Err(AppError::file_not_found(file_path));
+    }
+
+    // Priority 1: Try VRCX-style metadata from PNG Description chunk
+    if let Some(metadata_json) = get_png_description(file_path)? {
+        let cleaned_json = metadata_json.trim();
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(cleaned_json) {
+            if let Ok(metadata) = parse_vrchat_metadata(json) {
+                log::info!("Found VRCX metadata in {}", file_path);
+                return Ok(MetadataWithSource {
+                    metadata: Some(metadata),
+                    source: MetadataSource::Vrcx,
+                });
+            }
+        }
+    }
+
+    // Priority 2: Try VRChat native XMP metadata
+    if let Some(xmp_metadata) = extract_vrchat_xmp_metadata(file_path)? {
+        log::info!("Found VRChat XMP metadata in {}", file_path);
+        return Ok(MetadataWithSource {
+            metadata: Some(xmp_metadata),
+            source: MetadataSource::VrchatXmp,
+        });
+    }
+
+    // Priority 3: Filename pattern (only provides timestamp, no actual metadata)
+    log::info!("No embedded metadata found in {}", file_path);
+    Ok(MetadataWithSource {
+        metadata: None,
+        source: MetadataSource::None,
+    })
+}
+
 pub async fn extract_metadata(file_path: &str) -> AppResult<Option<ImageMetadata>> {
     log::info!("Starting metadata extraction for: {}", file_path);
 
@@ -21,9 +82,9 @@ pub async fn extract_metadata(file_path: &str) -> AppResult<Option<ImageMetadata
         return Err(AppError::file_not_found(file_path));
     }
 
-    // Try to get metadata from PNG text chunks
+    // Priority 1: Try to get VRCX-style metadata from PNG text chunks (Description)
     if let Some(metadata_json) = get_png_description(file_path)? {
-        log::info!("Found PNG metadata in {}", file_path);
+        log::info!("Found PNG Description metadata in {}", file_path);
         log::debug!(
             "Raw metadata JSON (first 500 chars): {}",
             &metadata_json[..std::cmp::min(500, metadata_json.len())]
@@ -34,13 +95,17 @@ pub async fn extract_metadata(file_path: &str) -> AppResult<Option<ImageMetadata
 
         match serde_json::from_str::<serde_json::Value>(cleaned_json) {
             Ok(json) => {
-                log::info!("Successfully parsed JSON metadata");
+                log::info!("Successfully parsed VRCX JSON metadata");
                 log::debug!("Parsed JSON structure: {:#}", json);
                 let metadata = parse_vrchat_metadata(json)?;
                 return Ok(Some(metadata));
             }
             Err(e) => {
-                log::warn!("Failed to parse metadata JSON from {}: {}", file_path, e);
+                log::warn!(
+                    "Failed to parse VRCX metadata JSON from {}: {}",
+                    file_path,
+                    e
+                );
                 log::debug!("Raw JSON that failed to parse (full): {}", metadata_json);
                 log::debug!("JSON length: {} bytes", metadata_json.len());
                 log::debug!(
@@ -65,10 +130,22 @@ pub async fn extract_metadata(file_path: &str) -> AppResult<Option<ImageMetadata
             }
         }
     } else {
-        log::info!("No PNG metadata found in {}", file_path);
+        log::info!("No VRCX PNG Description metadata found in {}", file_path);
     }
 
-    // If no metadata found in PNG, try extracting from filename patterns
+    // Priority 2: Try to get VRChat native XMP metadata
+    log::info!("Trying VRChat XMP metadata extraction for {}", file_path);
+    if let Some(xmp_metadata) = extract_vrchat_xmp_metadata(file_path)? {
+        log::info!(
+            "Successfully extracted VRChat XMP metadata from {}",
+            file_path
+        );
+        return Ok(Some(xmp_metadata));
+    } else {
+        log::info!("No VRChat XMP metadata found in {}", file_path);
+    }
+
+    // Priority 3: If no metadata found, try extracting from filename patterns
     log::info!("Trying filename pattern extraction for {}", file_path);
     extract_metadata_from_filename(file_path)
 }
@@ -371,6 +448,404 @@ fn decompress_deflate_data(compressed_data: &[u8]) -> Option<String> {
         }
         Err(e) => {
             log::warn!("Failed to decompress deflate data: {}", e);
+        }
+    }
+
+    None
+}
+
+/// Extract VRChat native XMP metadata from a PNG file
+/// VRChat stores metadata in XMP format with fields like:
+/// - XMP:Author
+/// - XMP:AuthorID
+/// - XMP:WorldID
+/// - XMP:WorldDisplayName
+fn extract_vrchat_xmp_metadata(file_path: &str) -> AppResult<Option<ImageMetadata>> {
+    log::debug!(
+        "Attempting to extract VRChat XMP metadata from: {}",
+        file_path
+    );
+
+    let file = fs::File::open(file_path)?;
+    let mut reader = BufReader::new(file);
+
+    // Verify PNG signature
+    let mut signature = [0u8; 8];
+    reader.read_exact(&mut signature)?;
+
+    const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
+    if signature != PNG_SIGNATURE {
+        log::debug!("Not a valid PNG file for XMP extraction");
+        return Ok(None);
+    }
+
+    // Read chunks looking for iTXt with XMP data
+    loop {
+        let mut chunk_header = [0u8; 8];
+        match reader.read_exact(&mut chunk_header) {
+            Ok(_) => {}
+            Err(_) => {
+                log::debug!("End of PNG file reached while searching for XMP");
+                break;
+            }
+        }
+
+        let length = u32::from_be_bytes([
+            chunk_header[0],
+            chunk_header[1],
+            chunk_header[2],
+            chunk_header[3],
+        ]) as usize;
+
+        let chunk_type = &chunk_header[4..8];
+        let chunk_type_str = std::str::from_utf8(chunk_type).unwrap_or("INVALID");
+
+        // XMP data is typically stored in iTXt chunks with "XML:com.adobe.xmp" keyword
+        // or in a raw XMP chunk
+        if chunk_type_str == "iTXt" {
+            const MAX_CHUNK_SIZE: usize = 50 * 1024 * 1024;
+            if length > MAX_CHUNK_SIZE {
+                reader.seek(SeekFrom::Current(length as i64 + 4))?;
+                continue;
+            }
+
+            let mut chunk_data = vec![0u8; length];
+            reader.read_exact(&mut chunk_data)?;
+
+            // Check if this is an XMP chunk
+            if let Some(xmp_content) = extract_xmp_from_itxt(&chunk_data) {
+                log::debug!("Found XMP data in iTXt chunk");
+                if let Some(metadata) = parse_vrchat_xmp(&xmp_content) {
+                    return Ok(Some(metadata));
+                }
+            }
+
+            // Skip CRC
+            reader.seek(SeekFrom::Current(4))?;
+        } else if chunk_type_str == "tEXt" || chunk_type_str == "zTXt" {
+            // Check text chunks for XMP-related content
+            const MAX_CHUNK_SIZE: usize = 50 * 1024 * 1024;
+            if length > MAX_CHUNK_SIZE {
+                reader.seek(SeekFrom::Current(length as i64 + 4))?;
+                continue;
+            }
+
+            let mut chunk_data = vec![0u8; length];
+            reader.read_exact(&mut chunk_data)?;
+
+            // Try to extract XMP from text chunks
+            if let Some(text_content) = if chunk_type_str == "tEXt" {
+                extract_text_content(&chunk_data)
+            } else {
+                extract_compressed_text_content(&chunk_data)
+            } {
+                if text_content.contains("x]mm[")
+                    || text_content.contains("XMP")
+                    || text_content.contains("WorldID")
+                    || text_content.contains("AuthorID")
+                {
+                    log::debug!("Found potential XMP data in {} chunk", chunk_type_str);
+                    if let Some(metadata) = parse_vrchat_xmp(&text_content) {
+                        return Ok(Some(metadata));
+                    }
+                }
+            }
+
+            // Skip CRC
+            reader.seek(SeekFrom::Current(4))?;
+        } else {
+            // Skip non-text chunk data and CRC
+            reader.seek(SeekFrom::Current(length as i64 + 4))?;
+        }
+
+        // Stop at IEND chunk
+        if chunk_type_str == "IEND" {
+            break;
+        }
+    }
+
+    // Also try to read raw XMP data from the file
+    // Some tools embed XMP directly without proper chunk structure
+    if let Some(metadata) = try_extract_raw_xmp(file_path)? {
+        return Ok(Some(metadata));
+    }
+
+    Ok(None)
+}
+
+/// Extract XMP content from an iTXt chunk
+fn extract_xmp_from_itxt(data: &[u8]) -> Option<String> {
+    // iTXt format: keyword\0compression_flag\0compression_method\0language_tag\0translated_keyword\0text
+    let null_positions: Vec<usize> = data
+        .iter()
+        .enumerate()
+        .filter(|(_, &b)| b == 0)
+        .map(|(i, _)| i)
+        .collect();
+
+    if null_positions.is_empty() {
+        return None;
+    }
+
+    let keyword = std::str::from_utf8(&data[..null_positions[0]]).ok()?;
+
+    // Check for XMP-related keywords
+    if keyword.contains("XMP")
+        || keyword.contains("XML:com.adobe.xmp")
+        || keyword.eq_ignore_ascii_case("xpacket")
+    {
+        log::debug!("Found XMP iTXt chunk with keyword: {}", keyword);
+
+        if null_positions.len() >= 4 {
+            let compression_flag = data.get(null_positions[0] + 1).copied().unwrap_or(0);
+
+            if compression_flag == 0 {
+                // Uncompressed
+                let text_start = null_positions
+                    .get(4)
+                    .copied()
+                    .unwrap_or(null_positions.last().copied().unwrap_or(0))
+                    + 1;
+                if text_start < data.len() {
+                    return std::str::from_utf8(&data[text_start..])
+                        .ok()
+                        .map(|s| s.to_string());
+                }
+            } else {
+                // Compressed
+                let compressed_start = null_positions
+                    .get(4)
+                    .copied()
+                    .unwrap_or(null_positions.last().copied().unwrap_or(0))
+                    + 1;
+                if compressed_start < data.len() {
+                    return decompress_deflate_data(&data[compressed_start..]);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract text content from a tEXt chunk
+fn extract_text_content(data: &[u8]) -> Option<String> {
+    let null_pos = data.iter().position(|&b| b == 0)?;
+    let text_data = &data[null_pos + 1..];
+    std::str::from_utf8(text_data).ok().map(|s| s.to_string())
+}
+
+/// Extract text content from a zTXt chunk (compressed)
+fn extract_compressed_text_content(data: &[u8]) -> Option<String> {
+    let null_pos = data.iter().position(|&b| b == 0)?;
+    if data.len() > null_pos + 2 {
+        let compression_method = data[null_pos + 1];
+        if compression_method == 0 {
+            return decompress_deflate_data(&data[null_pos + 2..]);
+        }
+    }
+    None
+}
+
+/// Try to extract raw XMP data from the file by searching for XMP markers
+fn try_extract_raw_xmp(file_path: &str) -> AppResult<Option<ImageMetadata>> {
+    let file_content = fs::read(file_path)?;
+
+    // Look for XMP packet start marker
+    let xmp_start_marker = b"<?xpacket begin";
+    let xmp_end_marker = b"<?xpacket end";
+
+    // Also look for RDF marker which is common in XMP
+    let rdf_start = b"<x:xmpmeta";
+    let rdf_end = b"</x:xmpmeta>";
+
+    // Try to find XMP packet
+    if let Some(start_pos) = find_subsequence(&file_content, xmp_start_marker) {
+        if let Some(end_offset) = find_subsequence(&file_content[start_pos..], xmp_end_marker) {
+            let end_pos = start_pos + end_offset + 20; // Include the end marker and some buffer
+            let end_pos = std::cmp::min(end_pos, file_content.len());
+
+            if let Ok(xmp_text) = std::str::from_utf8(&file_content[start_pos..end_pos]) {
+                log::debug!("Found raw XMP packet in file");
+                if let Some(metadata) = parse_vrchat_xmp(xmp_text) {
+                    return Ok(Some(metadata));
+                }
+            }
+        }
+    }
+
+    // Try RDF format
+    if let Some(start_pos) = find_subsequence(&file_content, rdf_start) {
+        if let Some(end_offset) = find_subsequence(&file_content[start_pos..], rdf_end) {
+            let end_pos = start_pos + end_offset + rdf_end.len();
+
+            if let Ok(xmp_text) = std::str::from_utf8(&file_content[start_pos..end_pos]) {
+                log::debug!("Found raw RDF/XMP data in file");
+                if let Some(metadata) = parse_vrchat_xmp(xmp_text) {
+                    return Ok(Some(metadata));
+                }
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+/// Find a subsequence in a byte slice
+fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+/// Parse VRChat XMP metadata from XMP content string
+/// Looks for VRChat-specific XMP properties:
+/// - XMP:Author (display name)
+/// - XMP:AuthorID or vrc:AuthorID
+/// - XMP:WorldID or vrc:WorldID
+/// - XMP:WorldDisplayName or vrc:WorldDisplayName
+fn parse_vrchat_xmp(xmp_content: &str) -> Option<ImageMetadata> {
+    log::debug!("Parsing VRChat XMP content ({} bytes)", xmp_content.len());
+    log::debug!(
+        "XMP content preview: {}",
+        &xmp_content[..std::cmp::min(500, xmp_content.len())]
+    );
+
+    let mut metadata = ImageMetadata {
+        author: None,
+        world: None,
+        players: Vec::new(),
+    };
+
+    let mut found_any = false;
+
+    // Extract Author display name - try multiple possible attribute names
+    let author_name = extract_xmp_value(xmp_content, "Author")
+        .or_else(|| extract_xmp_value(xmp_content, "xmp:Author"))
+        .or_else(|| extract_xmp_value(xmp_content, "vrc:Author"))
+        .or_else(|| extract_xmp_value(xmp_content, "vrchat:Author"));
+
+    // Extract AuthorID - try multiple possible attribute names
+    let author_id = extract_xmp_value(xmp_content, "AuthorID")
+        .or_else(|| extract_xmp_value(xmp_content, "vrc:AuthorID"))
+        .or_else(|| extract_xmp_value(xmp_content, "XMP:AuthorID"))
+        .or_else(|| extract_xmp_value(xmp_content, "vrchat:AuthorID"));
+
+    // Extract WorldID
+    let world_id = extract_xmp_value(xmp_content, "WorldID")
+        .or_else(|| extract_xmp_value(xmp_content, "vrc:WorldID"))
+        .or_else(|| extract_xmp_value(xmp_content, "XMP:WorldID"))
+        .or_else(|| extract_xmp_value(xmp_content, "vrchat:WorldID"));
+
+    // Extract WorldDisplayName
+    let world_name = extract_xmp_value(xmp_content, "WorldDisplayName")
+        .or_else(|| extract_xmp_value(xmp_content, "vrc:WorldDisplayName"))
+        .or_else(|| extract_xmp_value(xmp_content, "XMP:WorldDisplayName"))
+        .or_else(|| extract_xmp_value(xmp_content, "vrchat:WorldDisplayName"));
+
+    // Set author if we have AuthorID or Author name
+    if author_id.is_some() || author_name.is_some() {
+        let id = author_id.unwrap_or_default();
+        let name = author_name.unwrap_or_default();
+
+        log::debug!("Found XMP Author: {} ({})", name, id);
+        metadata.author = Some(AuthorInfo {
+            display_name: name,
+            id,
+        });
+        found_any = true;
+    }
+
+    // Set world info if we have WorldID
+    if world_id.is_some() || world_name.is_some() {
+        let id = world_id.unwrap_or_default();
+        let name = world_name.unwrap_or_default();
+
+        log::debug!("Found XMP World: {} ({})", name, id);
+
+        metadata.world = Some(WorldInfo {
+            name,
+            id,
+            instance_id: String::new(), // Not available in XMP
+        });
+        found_any = true;
+    }
+
+    // Note: VRChat XMP doesn't include player list, only author and world
+
+    if found_any {
+        log::info!(
+            "Successfully parsed VRChat XMP metadata - Author: {}, World: {}",
+            metadata.author.is_some(),
+            metadata.world.is_some()
+        );
+        Some(metadata)
+    } else {
+        log::debug!("No VRChat metadata found in XMP content");
+        None
+    }
+}
+
+/// Extract a value from XMP content for a given property name
+/// Handles both XML attribute format and element format
+fn extract_xmp_value(content: &str, property: &str) -> Option<String> {
+    // Try namespaced XML element: <ns:property>value</ns:property>
+    let ns_elem_pattern = format!(
+        r#"<(\w+):{}[^>]*>([^<]*)</\1:{}>"#,
+        regex::escape(property),
+        regex::escape(property)
+    );
+    if let Ok(re) = regex::Regex::new(&ns_elem_pattern) {
+        if let Some(caps) = re.captures(content) {
+            if let Some(value) = caps.get(2) {
+                let val = value.as_str().trim().to_string();
+                if !val.is_empty() {
+                    return Some(val);
+                }
+            }
+        }
+    }
+
+    // Try XML element: <property>value</property>
+    let elem_pattern = format!(
+        r#"<{}[^>]*>([^<]*)</{}>"#,
+        regex::escape(property),
+        regex::escape(property)
+    );
+    if let Ok(re) = regex::Regex::new(&elem_pattern) {
+        if let Some(caps) = re.captures(content) {
+            if let Some(value) = caps.get(1) {
+                let val = value.as_str().trim().to_string();
+                if !val.is_empty() {
+                    return Some(val);
+                }
+            }
+        }
+    }
+
+    // Try attribute: property="value"
+    let attr_pattern = format!(r#"(?:^|[^a-zA-Z]){}="([^"]*)""#, regex::escape(property));
+    if let Ok(re) = regex::Regex::new(&attr_pattern) {
+        if let Some(caps) = re.captures(content) {
+            if let Some(value) = caps.get(1) {
+                let val = value.as_str().to_string();
+                if !val.is_empty() {
+                    return Some(val);
+                }
+            }
+        }
+    }
+
+    // Try namespaced attribute: ns:property="value"
+    let prefixed_pattern = format!(r#"\w+:{}="([^"]*)""#, regex::escape(property));
+    if let Ok(re) = regex::Regex::new(&prefixed_pattern) {
+        if let Some(caps) = re.captures(content) {
+            if let Some(value) = caps.get(1) {
+                let val = value.as_str().to_string();
+                if !val.is_empty() {
+                    return Some(val);
+                }
+            }
         }
     }
 
