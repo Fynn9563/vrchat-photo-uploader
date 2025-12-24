@@ -21,6 +21,7 @@ pub struct Config {
     pub backup_original_files: bool,
     pub show_upload_notifications: bool,
     pub log_level: String,
+    pub compression_format: String, // "webp" or "jpg"
 }
 
 impl Default for Config {
@@ -40,6 +41,7 @@ impl Default for Config {
             backup_original_files: false,
             show_upload_notifications: true,
             log_level: "info".to_string(),
+            compression_format: "webp".to_string(), // WebP by default (better compression)
         }
     }
 }
@@ -53,6 +55,7 @@ impl From<Config> for AppConfig {
             enable_global_shortcuts: config.enable_global_shortcuts,
             auto_compress_threshold: config.auto_compress_threshold,
             upload_quality: config.upload_quality,
+            compression_format: config.compression_format,
         }
     }
 }
@@ -66,6 +69,7 @@ impl From<AppConfig> for Config {
             enable_global_shortcuts: app_config.enable_global_shortcuts,
             auto_compress_threshold: app_config.auto_compress_threshold,
             upload_quality: app_config.upload_quality,
+            compression_format: app_config.compression_format,
             ..Default::default()
         }
     }
@@ -205,6 +209,15 @@ pub fn validate_config(config: &Config) -> AppResult<()> {
         return Err(AppError::validation(
             "log_level",
             "Must be a valid log level",
+        ));
+    }
+
+    // Validate compression format
+    let valid_formats = ["webp", "jpg"];
+    if !valid_formats.contains(&config.compression_format.as_str()) {
+        return Err(AppError::validation(
+            "compression_format",
+            "Must be 'webp' or 'jpg'",
         ));
     }
 

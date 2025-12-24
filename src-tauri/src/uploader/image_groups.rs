@@ -369,3 +369,127 @@ fn create_thread_title(all_worlds: &[WorldInfo]) -> String {
         "📸 Photos".to_string()
     }
 }
+
+/// Creates a message with just worlds (no players) - used for first retry when combined message is too long
+pub fn create_worlds_only_message(all_worlds: &[WorldInfo], timestamp: Option<i64>) -> String {
+    if all_worlds.is_empty() {
+        let mut content = String::from("📸 Photos");
+        if let Some(ts) = timestamp {
+            content.push_str(&format!(" taken at <t:{}:f>", ts));
+        }
+        return content;
+    }
+
+    let mut content = String::from("📸 Photos taken at ");
+
+    let world_parts: Vec<String> = all_worlds
+        .iter()
+        .map(|world| {
+            let vrchat_link = format!("https://vrchat.com/home/launch?worldId={}", world.id);
+            let vrcx_link = format!("https://vrcx.azurewebsites.net/world/{}", world.id);
+            format!(
+                "**{}** ([VRChat](<{}>), [VRCX](<{}>))",
+                world.name, vrchat_link, vrcx_link
+            )
+        })
+        .collect();
+
+    content.push_str(&world_parts.join(", "));
+
+    if let Some(ts) = timestamp {
+        content.push_str(&format!(" at <t:{}:f>", ts));
+    }
+
+    content
+}
+
+/// Creates a compact world summary (names only) and separate links messages
+/// Returns (summary_message, link_messages) - used when there are many worlds
+pub fn create_compact_world_messages(all_worlds: &[WorldInfo]) -> (String, Vec<String>) {
+    const MAX_LENGTH: usize = 1900;
+
+    if all_worlds.is_empty() {
+        return ("📸 Photos".to_string(), vec![]);
+    }
+
+    // Build summary message with world names (bullet list)
+    let mut summary = format!("📸 Photos from {} worlds:\n", all_worlds.len());
+    for world in all_worlds.iter() {
+        summary.push_str(&format!("• {}\n", world.name));
+    }
+
+    // Build links messages (chunked to fit Discord limit)
+    let mut link_messages = Vec::new();
+    let mut current_links = String::from("World Links:\n");
+    let prefix_len = current_links.len();
+
+    for world in all_worlds.iter() {
+        let vrchat_link = format!("https://vrchat.com/home/launch?worldId={}", world.id);
+        let vrcx_link = format!("https://vrcx.azurewebsites.net/world/{}", world.id);
+        let link_line = format!("• [VRChat](<{}>) | [VRCX](<{}>)\n", vrchat_link, vrcx_link);
+
+        if current_links.len() + link_line.len() > MAX_LENGTH {
+            // Current message full, save and start new one
+            link_messages.push(current_links.trim_end().to_string());
+            current_links = link_line;
+        } else {
+            current_links.push_str(&link_line);
+        }
+    }
+
+    // Don't forget the last links message
+    if current_links.len() > prefix_len || !current_links.is_empty() {
+        link_messages.push(current_links.trim_end().to_string());
+    }
+
+    log::info!(
+        "Created compact world summary and {} link message(s) for {} worlds",
+        link_messages.len(),
+        all_worlds.len()
+    );
+
+    (summary.trim_end().to_string(), link_messages)
+}
+
+/// Creates player messages that fit within Discord's limit (used when combined message is too long)
+pub fn create_split_player_messages(all_players: &[PlayerInfo]) -> Vec<String> {
+    const MAX_LENGTH: usize = 1900;
+    let mut messages = Vec::new();
+
+    if all_players.is_empty() {
+        return messages;
+    }
+
+    let mut current = String::from("with ");
+    let prefix_len = current.len();
+
+    for player in all_players.iter() {
+        let player_str = format!("**{}**", player.display_name);
+        let separator = if current.len() > prefix_len { ", " } else { "" };
+        let addition = format!("{}{}", separator, player_str);
+
+        if current.len() > prefix_len && current.len() + addition.len() > MAX_LENGTH {
+            // Current message is full, end with comma and start new one
+            current.push(',');
+            messages.push(current);
+            current = format!("**{}**", player.display_name);
+        } else {
+            current.push_str(&addition);
+        }
+    }
+
+    // Don't forget the last message
+    if current.len() > prefix_len {
+        messages.push(current);
+    } else if current == "with " && !all_players.is_empty() {
+        // Edge case: first player name alone
+        messages.push(format!("with **{}**", all_players[0].display_name));
+    }
+
+    log::info!(
+        "Created {} split player message(s) for {} players",
+        messages.len(),
+        all_players.len()
+    );
+    messages
+}

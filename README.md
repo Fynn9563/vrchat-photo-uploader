@@ -3,104 +3,136 @@
 ![Version](https://img.shields.io/github/v/release/fynn9563/vrchat-photo-uploader)
 ![License](https://img.shields.io/github/license/fynn9563/vrchat-photo-uploader?branch=master)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-brightgreen)
+![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri-blue)
 
 A powerful desktop application for uploading VRChat photos to Discord with intelligent grouping, automatic metadata extraction, and seamless integration.
- 
-## ✨ Features
 
-- **🏷️ Automatic Metadata Extraction** - Reads VRChat photo metadata (world, players, timestamps)
-- **📋 Smart Grouping** - Groups photos by world and players for organized uploads
-- **🗜️ Intelligent Compression** - Compresses images only when Discord requires it
-- **🔄 Robust Retry System** - Automatically retries failed uploads with exponential backoff
-- **📊 Progress Tracking** - Real-time upload progress with detailed statistics
-- **💬 Discord Forum Support** - Creates threaded posts in Discord forum channels
-- **🎨 Dark/Light Theme** - Automatic theme switching based on system preference
-- **⚡ Global Shortcuts** - Quick access with `Ctrl+Shift+U` for file selection
-- **👁️ Image Previews** - `Ctrl+Hover` for instant thumbnail previews
-- **📝 Metadata Editor** - Edit and embed custom metadata into images
+## Features
 
-## 🚀 Quick Start
+### Smart Grouping
+- **Group by World** - Automatically groups photos taken in the same VRChat world
+- **Group by Time** - Configurable time windows (5 min to 2 hours, or custom)
+- **Combined Grouping** - Use both world and time-based grouping together
+- **Individual Mode** - Upload each photo as a separate message
 
-1. **Download** the latest release for your platform from the [Releases page](https://github.com/fynn9563/vrchat-photo-uploader/releases)
-2. **Install** the application:
-   - **Windows**: Run the `.msi` installer or use the portable `.exe`
-   - **Linux**: Use the `.AppImage` (portable) or install the `.deb` package
-3. **Configure** your Discord webhook in the app
-4. **Select** your VRChat photos and upload!
+### Metadata Extraction
+- **Automatic Detection** - Reads embedded VRCX metadata from PNG files
+- **World Information** - Extracts world name, ID, and instance details
+- **Player Lists** - Captures all players present when the photo was taken
+- **Timestamps** - Preserves original photo timestamps in Discord posts
+- **VRChat & VRCX Links** - Automatically generates clickable world links
 
-## 📦 Installation
+### Discord Integration
+- **Multiple Webhooks** - Save and manage multiple Discord webhooks
+- **Forum Channel Support** - Create threaded posts in Discord forum channels
+- **Smart Message Formatting** - Automatically handles Discord's 2000 character limit
+- **Batched Uploads** - Configurable images per message (1-10)
+- **Player Name Lists** - Optional player names in post content
+
+### Image Processing
+- **Automatic Compression** - Compresses only when Discord's file size limit requires it
+- **WebP & JPEG Support** - Choose your preferred compression format
+- **Intelligent Chunking** - Splits large uploads to stay under Discord limits
+- **Retry on Failure** - Automatic retry with payload splitting for 413/400 errors
+
+### User Experience
+- **Drag & Drop** - Simply drag photos into the app
+- **Real-time Progress** - Live upload progress with ETA
+- **Dark/Light Theme** - Follows system preference or manual selection
+- **Global Shortcuts** - `Ctrl+Shift+U` to open file picker from anywhere
+- **Image Previews** - `Ctrl+Hover` for instant thumbnail previews
+- **Upload Notifications** - Optional system notifications on completion
+- **Auto Updates** - Built-in update checker
+
+### Tools
+- **Metadata Editor** - View, edit, and embed metadata into PNG files
+- **VRChat Folder Quick Access** - One-click access to your photos folder
+
+## Installation
 
 ### Windows
-- **Installer**: Download `VRChat-Photo-Uploader-v{version}-x64.msi` for guided installation
-- **Portable**: Download `VRChat-Photo-Uploader-v{version}-x64.exe` for standalone use
+Download from the [Releases page](https://github.com/fynn9563/vrchat-photo-uploader/releases):
+- **Installer**: `VRChat-Photo-Uploader-v{version}-x64.msi` - Recommended for most users
+- **Portable**: `VRChat-Photo-Uploader-v{version}-x64.exe` - No installation required
 
 ### Linux
-- **AppImage (Portable)**: Download `VRChat-Photo-Uploader-v{version}-x86_64.AppImage`
-- **Debian/Ubuntu**: Download `vrchat-photo-uploader_{version}_amd64.deb`
+- **AppImage**: `VRChat-Photo-Uploader-v{version}-x86_64.AppImage` - Portable, works on most distros
+- **Debian/Ubuntu**: `vrchat-photo-uploader_{version}_amd64.deb` - Native package
 
-## 🛠️ Setup
+## Quick Start
 
-### Discord Webhook Configuration
-
-1. In Discord, go to **Server Settings** → **Integrations** → **Webhooks**
-2. Click **New Webhook** and configure:
-   - Name your webhook
-   - Select the target channel
+1. **Add a Webhook**
+   - In Discord: Server Settings > Integrations > Webhooks > New Webhook
    - Copy the webhook URL
-3. In the app, click **🔧 Manage** next to webhook selection
-4. Add your webhook URL and name
-5. Enable **Forum Channel** if uploading to a Discord forum channel
+   - In the app: Click **Manage** > paste URL > **Add Webhook**
 
-### VRChat Folder Setup
+2. **Configure Settings**
+   - Enable **Forum Channel** if posting to a Discord forum
+   - Enable **Smart Grouping** for automatic organization
+   - Adjust **Images per Message** (default: 10)
 
-1. Click **⚙️ Preferences** in the app
-2. Set your VRChat photos folder (usually `%USERPROFILE%\Pictures\VRChat`)
-3. Or use **📂 Open VRChat Folder** to browse
+3. **Upload Photos**
+   - Drag & drop photos or click to browse
+   - Review the queue and adjust selections
+   - Click **Start Upload**
 
-## 📋 Usage
+## Settings
 
-### Basic Upload
+### Upload Settings
+| Setting | Description |
+|---------|-------------|
+| Forum Channel | Creates threaded posts in forum channels |
+| Images per Message | Maximum attachments per Discord message (1-10) |
+| Smart Grouping | Automatically organizes photos by metadata |
+| Group by World | Groups photos from the same VRChat world |
+| Group by Time | Groups photos within a time window |
+| Include Player Names | Lists players in the post content |
 
-1. **Select Webhook** from the dropdown
-2. **Configure Settings**:
-   - ✅ Group by metadata (recommended)
-   - 📊 Max images per message (1-10)
-   - 👥 Include player names in posts
-3. **Add Photos**: Drag & drop or click to browse
-4. **Review Queue**: Select/deselect photos as needed
-5. **Start Upload**: Click 🚀 **Start Upload**
+### Preferences
+| Setting | Description |
+|---------|-------------|
+| Theme | Dark, Light, or Auto (follows system) |
+| Notifications | Show system notifications on upload completion |
+| Global Shortcuts | Enable `Ctrl+Shift+U` system-wide shortcut |
+| Image Previews | Enable `Ctrl+Hover` thumbnail previews |
+| Compression Format | WebP (smaller) or JPEG (compatible) |
 
-### Advanced Features
+## Keyboard Shortcuts
 
-- **Metadata Editing**: Select photos and click **✏️ Edit Metadata** to modify world/player information
-- **Forum Channels**: Enable forum mode for threaded uploads with automatic continuation
-- **Keyboard Shortcuts**:
-  - `Ctrl+Shift+U` - Quick file selection
-  - `Ctrl+Hover` - Preview images in queue
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Shift+U` | Open file picker (global, when enabled) |
+| `Ctrl+Hover` | Preview image thumbnail in queue |
 
-## ⚙️ System Requirements
+## System Requirements
 
-- **Windows**: Windows 10 or later
-- **Linux**: Any modern distribution with GTK 3.24+
+- **Windows**: Windows 10 or later (x64)
+- **Linux**: Any modern distribution with GTK 3.24+ (x64)
 
-## 🤝 Contributing
+## Important Note: File Size Limits
+
+> **⚠️ Discord servers without Nitro have an 8MB file upload limit per file.**
+>
+> This app includes safeguards to handle large files:
+> - Automatic compression (WebP/JPEG) when files exceed Discord's limit
+> - Intelligent chunking to split uploads across multiple messages
+> - Automatic retry with smaller payloads on failure
+>
+> However, **uploads may still fail** if images are extremely large or if compression cannot reduce them enough. For best results with non-Nitro servers, consider using lower resolution screenshots or enabling compression in your VRChat settings.
+
+## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Support
 
-- Built with [Tauri](https://tauri.app/) for cross-platform desktop development
-- Made with ❤️ for the VRChat community
-- Created by **Fynn9563**
-
-## 📞 Support
-
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/fynn9563/vrchat-photo-uploader/issues)
+- **Bug Reports**: [GitHub Issues](https://github.com/fynn9563/vrchat-photo-uploader/issues)
+- **Feature Requests**: [GitHub Issues](https://github.com/fynn9563/vrchat-photo-uploader/issues)
 
 ---
 
-**Happy uploading!** 📸✨
+Created by **Fynn9563** | Made with ❤️ for the VRChat community

@@ -482,6 +482,19 @@ fn extract_metadata_from_filename(file_path: &str) -> AppResult<Option<ImageMeta
 }
 
 pub async fn compress_image(file_path: &str, quality: u8) -> AppResult<String> {
+    // Load config to get compression format preference
+    let format = crate::config::load_config()
+        .map(|c| c.compression_format)
+        .unwrap_or_else(|_| "webp".to_string());
+
+    compress_image_with_format(file_path, quality, &format).await
+}
+
+pub async fn compress_image_with_format(
+    file_path: &str,
+    quality: u8,
+    format: &str,
+) -> AppResult<String> {
     // Validate inputs
     InputValidator::validate_image_file(file_path)?;
 
@@ -497,24 +510,46 @@ pub async fn compress_image(file_path: &str, quality: u8) -> AppResult<String> {
 
     // Create output path in secure temp directory
     let temp_path = FileSystemGuard::create_secure_temp_file(file_path)?;
-    let output_path = temp_path.with_extension("jpg");
 
-    // Convert to JPEG with specified quality
-    let mut output = Vec::new();
-    let mut cursor = Cursor::new(&mut output);
+    // Choose format based on setting
+    if format == "jpg" {
+        let output_path = temp_path.with_extension("jpg");
+        let mut output = Vec::new();
+        let mut cursor = Cursor::new(&mut output);
+        img.write_to(&mut cursor, ImageOutputFormat::Jpeg(quality))?;
+        fs::write(&output_path, output)?;
 
-    img.write_to(&mut cursor, ImageOutputFormat::Jpeg(quality))?;
+        log::info!(
+            "Compressed {} to JPEG at {} (quality: {})",
+            file_path,
+            output_path.display(),
+            quality
+        );
 
-    fs::write(&output_path, output)?;
+        Ok(output_path.to_string_lossy().to_string())
+    } else {
+        // Use webp crate for lossy WebP compression with quality control
+        let output_path = temp_path.with_extension("webp");
 
-    log::info!(
-        "Compressed {} to {} (quality: {})",
-        file_path,
-        output_path.display(),
-        quality
-    );
+        // Convert to RGBA for webp encoder
+        let rgba_img = img.to_rgba8();
+        let (width, height) = rgba_img.dimensions();
 
-    Ok(output_path.to_string_lossy().to_string())
+        // Create WebP encoder with lossy compression
+        let encoder = webp::Encoder::from_rgba(&rgba_img, width, height);
+        let webp_data = encoder.encode(quality as f32);
+
+        fs::write(&output_path, &*webp_data)?;
+
+        log::info!(
+            "Compressed {} to WebP at {} (quality: {})",
+            file_path,
+            output_path.display(),
+            quality
+        );
+
+        Ok(output_path.to_string_lossy().to_string())
+    }
 }
 
 fn load_image_efficiently(file_path: &str) -> AppResult<image::DynamicImage> {
@@ -708,14 +743,15 @@ pub fn generate_thumbnail(file_path: &str, max_dimension: u32) -> AppResult<Stri
 
     // Create output path in secure temp directory
     let temp_path = FileSystemGuard::create_secure_temp_file(file_path)?;
-    let output_path = temp_path.with_extension("thumb.jpg");
+    let output_path = temp_path.with_extension("thumb.webp");
 
-    // Convert to JPEG
-    let mut output = Vec::new();
-    let mut cursor = Cursor::new(&mut output);
-    thumbnail.write_to(&mut cursor, ImageOutputFormat::Jpeg(60))?;
+    // Convert to WebP using webp crate for better compression
+    let rgba_img = thumbnail.to_rgba8();
+    let (width, height) = rgba_img.dimensions();
+    let encoder = webp::Encoder::from_rgba(&rgba_img, width, height);
+    let webp_data = encoder.encode(60.0); // quality 60 for thumbnails
 
-    fs::write(&output_path, output)?;
+    fs::write(&output_path, &*webp_data)?;
 
     log::info!(
         "Generated thumbnail for {} at {} ({}x{})",

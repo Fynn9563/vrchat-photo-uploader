@@ -154,14 +154,19 @@ impl FileSystemGuard {
         let temp_dir = std::env::temp_dir().join("vrchat_uploader_secure");
         std::fs::create_dir_all(&temp_dir)?;
 
-        // Generate secure random filename
-        let random_name = uuid::Uuid::new_v4().to_string();
+        // Preserve original filename stem, add unique suffix to avoid collisions
+        let original_stem = Path::new(original_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("temp");
         let extension = Path::new(original_path)
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("tmp");
 
-        let temp_path = temp_dir.join(format!("{}.{}", random_name, extension));
+        // Add short UUID suffix for uniqueness while keeping original name
+        let short_id = &uuid::Uuid::new_v4().to_string()[..8];
+        let temp_path = temp_dir.join(format!("{}_{}.{}", original_stem, short_id, extension));
 
         Ok(temp_path)
     }

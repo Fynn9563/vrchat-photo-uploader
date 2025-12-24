@@ -55,6 +55,7 @@ interface AppConfig {
   enable_global_shortcuts: boolean;
   auto_compress_threshold: number;
   upload_quality: number;
+  compression_format: string; // "webp" or "jpg"
 }
 
 // App state management
@@ -2270,8 +2271,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Settings and other modals
   const settingsBtn = document.getElementById('settingsBtn');
-  settingsBtn?.addEventListener('click', () => {
+  settingsBtn?.addEventListener('click', async () => {
     updateVRChatFolderDisplay();
+
+    // Load current config to populate settings
+    try {
+      const config = await invoke<AppConfig>('get_app_config');
+      const compressionFormat = document.getElementById('compressionFormat') as HTMLSelectElement;
+      if (compressionFormat && config.compression_format) {
+        compressionFormat.value = config.compression_format;
+      }
+    } catch (error) {
+      console.error('Failed to load config:', error);
+    }
+
     ModalManager.openModal('settingsModal');
   });
 
@@ -2668,6 +2681,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         applyTheme(theme);
       }
 
+      const compressionFormat = document.getElementById('compressionFormat') as HTMLSelectElement;
+
       const config: AppConfig = {
         last_webhook_id: state.selectedWebhookId ?? undefined,
         group_by_metadata: groupByMetadata?.checked || true,
@@ -2675,6 +2690,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         enable_global_shortcuts: enableGlobalShortcuts?.checked || true,
         auto_compress_threshold: 8,
         upload_quality: 85,
+        compression_format: compressionFormat?.value || 'webp',
       };
 
       await invoke('save_app_config', { config });

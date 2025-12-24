@@ -91,6 +91,7 @@ pub struct AppConfig {
     pub enable_global_shortcuts: bool,
     pub auto_compress_threshold: u64, // MB
     pub upload_quality: u8,
+    pub compression_format: String, // "webp" or "jpg"
 }
 
 // Progress state type (defined in main.rs, re-exported here for commands)

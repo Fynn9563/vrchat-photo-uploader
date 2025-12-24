@@ -311,6 +311,15 @@
               <input type="checkbox" id="enableImagePreview" class="checkbox" checked />
               <label for="enableImagePreview" class="form-label">Enable Ctrl+Hover image previews</label>
             </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <label for="compressionFormat" class="form-label">Compression Format</label>
+              <select id="compressionFormat" class="form-control">
+                <option value="webp">WebP (smaller files, recommended)</option>
+                <option value="jpg">JPEG (better compatibility)</option>
+              </select>
+              <div class="form-help">Format used when images need to be compressed for Discord</div>
+            </div>
           </div>
         </div>
 
