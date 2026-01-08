@@ -71,6 +71,7 @@ anyhow = "1.0"
 image = { version = "0.24.8", features = ["png", "jpeg", "webp", "gif"] }
 webp = "0.3"
 flate2 = "1.0.28"
+notify = "6.1"
 
 [features]
 default = []

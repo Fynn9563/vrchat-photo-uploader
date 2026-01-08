@@ -13,10 +13,14 @@ pub struct ImageGroup {
 }
 
 /// Groups images by world and time window
+// Update signature and implementation
 pub async fn group_images_by_metadata(
     file_paths: Vec<String>,
     time_window_minutes: u32,
     group_by_world: bool,
+    merge_no_metadata: bool,
+    app_handle: tauri::AppHandle,
+    session_id: String,
 ) -> Vec<ImageGroup> {
     let mut image_data: Vec<(String, Option<ImageMetadata>, Option<i64>, String)> = Vec::new();
     let no_time_limit = time_window_minutes == 0;
@@ -26,23 +30,102 @@ pub async fn group_images_by_metadata(
         (time_window_minutes as i64) * 60
     };
 
-    // Extract metadata and compute group keys
-    for file_path in file_paths {
-        log::debug!("Extracting metadata for: {}", file_path);
-        let metadata = image_processor::extract_metadata(&file_path)
-            .await
-            .ok()
-            .flatten();
-        let timestamp = image_processor::get_timestamp_from_filename(&file_path);
+    // Parallel metadata extraction
+    // Use a semaphore to limit concurrency
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use tauri::Manager;
+    use tokio::sync::Semaphore;
 
+    let max_concurrent = std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(4)
+        .min(16);
+    let semaphore = Arc::new(Semaphore::new(max_concurrent));
+    let results_mutex = Arc::new(Mutex::new(Vec::with_capacity(file_paths.len())));
+
+    let total_files = file_paths.len();
+    let completed_counter = Arc::new(AtomicUsize::new(0));
+
+    let mut handles = Vec::new();
+
+    for (index, file_path) in file_paths.into_iter().enumerate() {
+        let sem = semaphore.clone();
+        let results = results_mutex.clone();
+        let completed = completed_counter.clone();
+        let app_handle = app_handle.clone();
+        let session_id = session_id.clone();
+
+        handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await.unwrap();
+            log::debug!("Extracting metadata for: {}", file_path);
+
+            let metadata = image_processor::extract_metadata(&file_path)
+                .await
+                .ok()
+                .flatten();
+            let timestamp = image_processor::get_timestamp_from_filename(&file_path);
+
+            let mut guard = results.lock().unwrap();
+            guard.push((index, file_path, metadata, timestamp));
+
+            // Emit progress
+            let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
+            // Emit batch updates to avoid flooding event loop for 5000 items
+            if done % 5 == 0 || done == total_files {
+                app_handle.emit_all("upload-progress", serde_json::json!({
+                    "session_id": session_id,
+                    "total_images": total_files,
+                    "completed": 0, // Uploads completed
+                    "current_progress": (done as f64 / total_files as f64) * 100.0,
+                    "session_status": format!("Preparing images... {}/{}", done, total_files),
+                    // We can also send a custom event if main listener expects distinct fields
+                 })).ok();
+            }
+        }));
+    }
+
+    // Wait for all
+    for handle in handles {
+        if let Err(e) = handle.await {
+            log::error!("Metadata extraction task failed: {}", e);
+        }
+    }
+
+    // Extract results and sort by original index to maintain order
+    let mut collected_results = match Arc::try_unwrap(results_mutex) {
+        Ok(mutex) => mutex.into_inner().unwrap(),
+        Err(arc) => arc.lock().unwrap().clone(), // Fallback clone
+    };
+    collected_results.sort_by_key(|r| r.0);
+
+    let mut last_valid_group_key: Option<String> = None;
+
+    // Sequential grouping logic (must be sequential for context)
+    for (_index, file_path, metadata, timestamp) in collected_results {
         let group_key = if let Some(ref meta) = metadata {
-            create_metadata_key(
+            let key = create_metadata_key(
                 meta,
                 timestamp,
                 time_window_seconds,
                 no_time_limit,
                 group_by_world,
-            )
+            );
+            // Update last valid key if we found metadata
+            if merge_no_metadata {
+                last_valid_group_key = Some(key.clone());
+            }
+            key
+        } else if merge_no_metadata && last_valid_group_key.is_some() {
+            // If merging is enabled and we have a previous group, use it!
+            let key = last_valid_group_key.as_ref().unwrap().clone();
+            log::info!(
+                "Merging no-metadata file {} into previous group: {}",
+                file_path,
+                key
+            );
+            key
         } else if no_time_limit {
             "unknown_all".to_string()
         } else if let Some(ts) = timestamp {
@@ -53,6 +136,14 @@ pub async fn group_images_by_metadata(
 
         image_data.push((file_path, metadata, timestamp, group_key));
     }
+
+    log::info!(
+        "Grouping {} images (window: {}m, world: {}, merge_no_meta: {})",
+        image_data.len(),
+        time_window_minutes,
+        group_by_world,
+        merge_no_metadata
+    );
 
     // Group images and collect players and worlds
     let mut groups: HashMap<String, ImageGroup> = HashMap::new();

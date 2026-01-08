@@ -56,6 +56,28 @@ interface AppConfig {
   auto_compress_threshold: number;
   upload_quality: number;
   compression_format: string; // "webp" or "jpg"
+  enable_auto_upload?: boolean;
+  auto_upload_webhook_id?: number;
+  vrchat_path?: string;
+  single_thread_mode: boolean;
+  merge_no_metadata: boolean;
+  auto_upload_delay_seconds: number;
+  auto_upload_batch_size: number;
+  auto_upload_forum_channel: boolean;
+  auto_upload_single_thread: boolean;
+  auto_upload_group_by_metadata: boolean;
+  auto_upload_group_by_world: boolean;
+  auto_upload_group_by_time: boolean;
+  auto_upload_time_window: number;
+  auto_upload_include_players: boolean;
+  auto_upload_merge_no_metadata: boolean;
+}
+
+interface UserWebhookOverride {
+  id: number;
+  user_id?: string;
+  user_display_name?: string;
+  webhook_id: number;
 }
 
 // App state management
@@ -139,6 +161,126 @@ class AppState {
     }
   }
 
+  getCurrentSessionId(): string | null {
+    return this.currentUploadSession;
+  }
+
+  updateBackgroundPanelFromItem(data: any) {
+    const panel = document.getElementById('backgroundUploadPanel');
+    const text = document.getElementById('backgroundProgressText');
+    const count = document.getElementById('backgroundProgressCount');
+    const fill = document.getElementById('backgroundProgressFill') as HTMLElement;
+
+    if (panel) panel.classList.remove('hidden');
+
+    if (text) {
+      if (data.phase === 'compressing') {
+        text.textContent = 'Optimizing for Discord...';
+      } else if (data.phase === 'uploading') {
+        text.textContent = 'Uploading...';
+      } else if (data.phase === 'loading_metadata') {
+        text.textContent = 'Loading metadata...';
+      } else if (data.phase === 'creating_thread') {
+        text.textContent = 'Creating forum thread...';
+      } else if (data.phase === 'preparing') {
+        text.textContent = 'Preparing images...';
+      } else if (data.phase === 'success') {
+        text.textContent = 'Group uploaded!';
+      } else {
+        const phaseLabel = data.phase.replace(/_/g, ' ');
+        text.textContent = phaseLabel.charAt(0).toUpperCase() + phaseLabel.slice(1) + '...';
+      }
+    }
+
+    if (count && data.file_index !== undefined && data.total !== undefined) {
+      count.textContent = `${data.file_index + 1} / ${data.total}`;
+      if (fill) {
+        const percentage = (data.file_index + 1) / data.total * 100;
+        fill.style.width = `${percentage}%`;
+      }
+    }
+  }
+
+  updateBackgroundPanelFromProgress(progress: UploadProgress) {
+    const panel = document.getElementById('backgroundUploadPanel');
+    const text = document.getElementById('backgroundProgressText');
+    const count = document.getElementById('backgroundProgressCount');
+    const fill = document.getElementById('backgroundProgressFill') as HTMLElement;
+
+    if (panel) panel.classList.remove('hidden');
+
+    if (text) {
+      if (progress.session_status.includes('Preparing images...')) {
+        text.textContent = progress.session_status;
+      } else if (progress.session_status.includes('Preparing')) {
+        text.textContent = 'Preparing batch...';
+      } else if (progress.current_image) {
+        if (progress.current_image.includes(' - ')) {
+          const [phase, filename] = progress.current_image.split(' - ');
+          const cleanFilename = filename.split(/[\\/]/).pop();
+          if (phase === 'Creating Thread') {
+            text.textContent = 'Creating forum thread...';
+          } else if (phase === 'Compressing') {
+            text.textContent = `Optimizing ${cleanFilename}...`;
+          } else if (phase === 'Uploading') {
+            text.textContent = `Uploading ${cleanFilename}...`;
+          } else {
+            text.textContent = `${phase} ${cleanFilename}...`;
+          }
+        } else {
+          const filename = progress.current_image.split(/[\\/]/).pop();
+          text.textContent = `Processing ${filename}...`;
+        }
+      } else {
+        text.textContent = progress.session_status;
+      }
+    }
+
+    if (count) {
+      count.textContent = `${progress.completed} / ${progress.total_images}`;
+    }
+
+    if (fill && progress.total_images > 0) {
+      const percentage = (progress.completed / progress.total_images) * 100;
+      fill.style.width = `${percentage}%`;
+
+      // Reset classes
+      fill.classList.remove('error', 'warning');
+
+      if (progress.session_status === 'completed') {
+        if (text) text.textContent = 'Upload complete!';
+        if (fill) fill.style.width = '100%';
+
+        // Auto-hide after 5 seconds
+        setTimeout(() => {
+          const currentPanel = document.getElementById('backgroundUploadPanel');
+          if (currentPanel && !currentPanel.classList.contains('hidden')) {
+            currentPanel.classList.add('hidden');
+          }
+        }, 5000);
+      } else if (progress.session_status === 'failed') {
+        fill.classList.add('error');
+      } else if (progress.current_image?.includes('Creating Thread')) {
+        fill.classList.add('warning');
+      }
+    }
+
+    if (progress.session_status === 'failed') {
+      if (text) text.textContent = 'Auto-upload failed!';
+      return; // Keep visible if failed
+    }
+
+    if (progress.session_status === 'completed' || progress.completed >= progress.total_images) {
+      if (text) text.textContent = 'Upload complete!';
+      setTimeout(() => {
+        // Only hide if it's still showing "completed" behavior
+        if (text && (text.textContent?.includes('complete') || text.textContent?.includes('Group uploaded'))) {
+          panel?.classList.add('hidden');
+        }
+      }, 5000);
+    }
+  }
+
   // Thumbnail lazy loading methods
   initThumbnailObserver() {
     if (this.thumbnailObserver) {
@@ -156,23 +298,48 @@ class AppState {
       },
       {
         root: null,
-        rootMargin: '100px',
+        rootMargin: '2000px', // Generate well ahead of viewport
         threshold: 0.1
       }
     );
   }
 
-  private loadThumbnail(element: HTMLElement) {
+  private async loadThumbnail(element: HTMLElement) {
     const itemId = element.dataset.itemId;
     if (!itemId) return;
 
     const item = this.uploadQueue.find(q => q.id === itemId);
-    if (item?.thumbnailPath && !item.thumbnailLoaded) {
-      const img = element.querySelector('.queue-thumbnail-img') as HTMLImageElement;
-      if (img) {
+    if (!item) return;
+
+    // Check if we need to generate it
+    if (!item.thumbnailPath) {
+      try {
+        // Generate on demand
+        item.thumbnailPath = await invoke<string>('generate_thumbnail', {
+          filePath: item.filePath
+        });
+      } catch (err) {
+        console.warn(`Failed to generate thumbnail for ${item.filename}:`, err);
+        return;
+      }
+    }
+
+    // Render it if we have a path
+    if (item.thumbnailPath && !item.thumbnailLoaded) {
+      // Check if img tag exists (it might be the placeholder div)
+      let img = element.querySelector('.queue-thumbnail-img') as HTMLImageElement;
+
+      if (!img) {
+        // Clear placeholder text and inject img
+        element.innerHTML = `<img src="${convertFileSrc(item.thumbnailPath)}" alt="${item.filename}" class="queue-thumbnail-img" loading="lazy" />`;
+        item.thumbnailLoaded = true;
+      } else {
         img.src = convertFileSrc(item.thumbnailPath);
         item.thumbnailLoaded = true;
       }
+
+      // Add a nice fade-in effect via CSS class if desired, or just set loaded
+      element.classList.add('loaded');
     }
   }
 
@@ -184,28 +351,28 @@ class AppState {
 
   // Helper method for efficient base64 conversion
   private async arrayBufferToBase64(buffer: Uint8Array): Promise<string> {
-      let binary = '';
-      const bytes = new Uint8Array(buffer);
-      const chunkSize = 0x8000; // 32KB chunks to avoid call stack issues
-      
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        const chunk = bytes.subarray(i, i + chunkSize);
-        binary += String.fromCharCode.apply(null, Array.from(chunk));
-        
-        // Yield control back to UI every few chunks for large files
-        if (i % (chunkSize * 4) === 0) {
-          await new Promise(resolve => setTimeout(resolve, 0));
-        }
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000; // 32KB chunks to avoid call stack issues
+
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode.apply(null, Array.from(chunk));
+
+      // Yield control back to UI every few chunks for large files
+      if (i % (chunkSize * 4) === 0) {
+        await new Promise(resolve => setTimeout(resolve, 0));
       }
-      
-      return btoa(binary);
     }
+
+    return btoa(binary);
+  }
 
   // Load webhooks from database
   async loadWebhooks() {
     try {
       this.webhooks = await invoke('get_webhooks');
-      
+
       // Check if currently selected webhook still exists
       if (this.selectedWebhookId) {
         const webhookExists = this.webhooks.some(w => w.id === this.selectedWebhookId);
@@ -214,7 +381,7 @@ class AppState {
           this.selectedWebhookId = null;
         }
       }
-      
+
       this.updateWebhookSelector();
     } catch (error) {
       this.showError(`Failed to load webhooks: ${error}`);
@@ -224,9 +391,9 @@ class AppState {
   updateWebhookSelector() {
     const select = document.getElementById('webhookSelect') as HTMLSelectElement;
     if (!select) return;
-    
+
     select.innerHTML = '<option value="">Select a webhook...</option>';
-    
+
     this.webhooks.forEach(webhook => {
       const option = document.createElement('option');
       option.value = webhook.id.toString();
@@ -253,9 +420,9 @@ class AppState {
   updateExistingWebhooksDropdown() {
     const existingSelect = document.getElementById('existingWebhooks') as HTMLSelectElement;
     if (!existingSelect) return;
-    
+
     existingSelect.innerHTML = '<option value="">Select webhook to manage…</option>';
-    
+
     this.webhooks.forEach(webhook => {
       const option = document.createElement('option');
       option.value = webhook.id.toString();
@@ -271,11 +438,11 @@ class AppState {
 
   async addWebhook(name: string, url: string) {
     try {
-      const newWebhookId = await invoke('add_webhook', { name, url, is_forum: false });
+      await invoke('add_webhook', { name, url, isForum: false });
       await this.loadWebhooks();
-      
+
       this.updateWebhookSelector(); // This will now show the new webhook as selected
-      
+
       this.showSuccess('Webhook added and selected!');
     } catch (error) {
       this.showError(`Failed to add webhook: ${error}`);
@@ -284,8 +451,7 @@ class AppState {
 
   async updateWebhook(id: number, name: string, url: string) {
     try {
-      await invoke('delete_webhook', { id });
-      await invoke('add_webhook', { name, url, is_forum: false });
+      await invoke('update_webhook', { id, name, url, isForum: false });
       await this.loadWebhooks();
       this.showSuccess('Webhook updated successfully!');
     } catch (error) {
@@ -307,19 +473,19 @@ class AppState {
     this.isUploading = false;
     this.currentUploadSession = null;
     this.stopProgressPolling();
-    
+
     const startBtn = document.getElementById('startUpload') as HTMLButtonElement;
     const pauseBtn = document.getElementById('pauseUpload') as HTMLButtonElement;
     const retryBtn = document.getElementById('retryFailed');
     const progressSummary = document.getElementById('progressSummary');
-    
+
     if (startBtn) startBtn.disabled = false;
     if (pauseBtn) pauseBtn.classList.add('hidden');
     if (retryBtn) retryBtn.classList.add('hidden');
     if (progressSummary) progressSummary.classList.add('hidden');
-    
+
     this.updateControlButtons();
-    
+
     this.uploadQueue.forEach(item => {
       if (item.status === 'uploading') {
         item.status = 'queued';
@@ -327,9 +493,9 @@ class AppState {
         item.error = null;
       }
     });
-    
+
     this.updateQueueDisplay();
-    
+
     console.log('Upload state reset completely');
   }
 
@@ -381,16 +547,13 @@ class AppState {
       const validPaths = Array.from(fileInfoMap.keys());
       if (validPaths.length > 0) {
         this.updateLoadingProgress('Generating thumbnails...', '');
-        console.log(`Generating ${validPaths.length} thumbnails in parallel...`);
-
-        const thumbnailResults = await invoke<[string, string | null][]>('generate_thumbnails_batch', {
-          filePaths: validPaths
-        });
-
+        // OPTIMIZATION: Skip eager thumbnail generation for large batches
+        // Thumbnails will be generated lazily as they scroll into view
         this.setLoadingProgress(100, 'Complete!');
-        console.log(`Generated ${thumbnailResults.filter(r => r[1]).length} thumbnails`);
 
-        for (const [filePath, thumbnailPath] of thumbnailResults) {
+        // console.log(`Generated ${thumbnailResults.filter(r => r[1]).length} thumbnails`);
+
+        for (const filePath of validPaths) {
           const fileInfo = fileInfoMap.get(filePath);
           if (!fileInfo) continue;
 
@@ -407,7 +570,7 @@ class AppState {
             dimensions: { width: fileInfo.width, height: fileInfo.height },
             retryCount: 0,
             selected: true,
-            thumbnailPath: thumbnailPath || undefined,
+            thumbnailPath: undefined, // Will be generated lazily
             thumbnailLoaded: false,
           };
 
@@ -527,9 +690,9 @@ class AppState {
       <input type="checkbox" class="queue-checkbox" ${item.selected ? 'checked' : ''}>
       <div class="queue-thumbnail" data-item-id="${item.id}">
         ${item.thumbnailPath ?
-          `<img src="${thumbSrc}" alt="${item.filename}" class="queue-thumbnail-img" loading="lazy" />` :
-          item.filename.substring(0, 3).toUpperCase()
-        }
+        `<img src="${thumbSrc}" alt="${item.filename}" class="queue-thumbnail-img" loading="lazy" />` :
+        item.filename.substring(0, 3).toUpperCase()
+      }
       </div>
       <div class="queue-info">
         <div class="queue-filename">${item.filename}</div>
@@ -571,8 +734,8 @@ class AppState {
 
     // Setup lazy loading for thumbnail
     const thumbnail = element.querySelector('.queue-thumbnail') as HTMLElement;
-    if (thumbnail && item.thumbnailPath) {
-      // Observe this element for lazy loading
+    if (thumbnail) {
+      // Observe this element for lazy loading (and generation)
       this.observeThumbnail(thumbnail);
 
       // Setup image preview - use original file path for full-size preview
@@ -600,6 +763,10 @@ class AppState {
     // Clean up preview listeners before removing
     const item = this.uploadQueue.find(q => q.id === itemId);
     if (item) {
+      if (item.selected) {
+        // If removing a selected item, we might need to update control buttons status
+        // But we defer that to updateQueueDisplay call
+      }
       const element = document.querySelector(`[data-id="${itemId}"]`);
       if (element) {
         const thumbnail = element.querySelector('.queue-thumbnail') as HTMLElement;
@@ -655,6 +822,20 @@ class AppState {
     this.uploadQueue = [];
     this.updateQueueDisplay();
     this.showInfo('Queue cleared');
+  }
+
+  removeSuccessfulItems() {
+    const successfulIds = this.uploadQueue
+      .filter(item => item.status === 'success')
+      .map(item => item.id);
+
+    if (successfulIds.length === 0) {
+      this.showInfo('No successful items to remove');
+      return;
+    }
+
+    successfulIds.forEach(id => this.removeFromQueue(id));
+    this.showSuccess(`Removed ${successfulIds.length} successful items`);
   }
 
   selectAllItems() {
@@ -730,9 +911,10 @@ class AppState {
       const maxImages = parseInt((document.getElementById('maxImages') as HTMLSelectElement).value);
       const includePlayerNames = (document.getElementById('includePlayerNames') as HTMLInputElement).checked;
 
-      // Get the new grouping sub-options
       const groupByWorld = (document.getElementById('groupByWorld') as HTMLInputElement).checked;
       const groupByTime = (document.getElementById('groupByTime') as HTMLInputElement).checked;
+      const singleThreadMode = (document.getElementById('singleThreadMode') as HTMLInputElement).checked;
+      const mergeNoMetadata = (document.getElementById('mergeNoMetadata') as HTMLInputElement).checked;
 
       // Time window: if groupByTime is disabled, use 0 (no limit)
       const timeWindowValue = parseInt((document.getElementById('groupingTimeWindow') as HTMLInputElement).value);
@@ -756,7 +938,9 @@ class AppState {
           is_forum_channel: isForumChannel,
           include_player_names: includePlayerNames,
           grouping_time_window: groupingTimeWindow,
-          group_by_world: groupByWorld
+          group_by_world: groupByWorld,
+          single_thread_mode: singleThreadMode,
+          merge_no_metadata: mergeNoMetadata
         }
       });
 
@@ -764,28 +948,28 @@ class AppState {
       this.currentUploadSession = sessionId as string;
       console.log('Current upload session set to:', sessionId);
       this.showSuccess('Upload started!');
-      
+
       selectedItems.forEach(item => {
         item.status = 'uploading';
       });
       this.updateQueueDisplay();
-      
+
       const startBtn = document.getElementById('startUpload') as HTMLButtonElement;
       const pauseBtn = document.getElementById('pauseUpload') as HTMLButtonElement;
       if (startBtn) startBtn.disabled = true;
       if (pauseBtn) pauseBtn.classList.remove('hidden');
-      
+
       this.startProgressPolling(sessionId as string);
-      
+
     } catch (error) {
       this.isUploading = false;
       this.currentUploadSession = null;
       console.log('Upload failed - setting isUploading = false');
-      
+
       this.showError(`Failed to start upload: ${error}`);
       const progressSummary = document.getElementById('progressSummary');
       progressSummary?.classList.add('hidden');
-      
+
       this.updateControlButtons();
     }
   }
@@ -802,7 +986,7 @@ class AppState {
         const progress: UploadProgress | null = await invoke('get_upload_progress', {
           sessionId: sessionId
         });
-        
+
         if (progress) {
           console.log('Progress update:', {
             completed: progress.completed,
@@ -812,15 +996,15 @@ class AppState {
             successful: progress.successful_uploads.length,
             failed: progress.failed_uploads.length
           });
-          
+
           this.updateProgressFromSession(progress);
-          
+
           const allFilesProcessed = progress.completed >= progress.total_images;
-          const sessionCompleted = progress.session_status === 'completed' || 
-                                  progress.session_status === 'failed' ||
-                                  progress.session_status === 'cancelled' ||
-                                  allFilesProcessed;
-          
+          const sessionCompleted = progress.session_status === 'completed' ||
+            progress.session_status === 'failed' ||
+            progress.session_status === 'cancelled' ||
+            allFilesProcessed;
+
           if (sessionCompleted) {
             console.log('Upload session completed, stopping polling');
             this.stopProgressPolling();
@@ -849,28 +1033,28 @@ class AppState {
   updateProgressFromSession(progress: UploadProgress) {
     this.uploadQueue.forEach(item => {
       if (item.selected && item.filePath) {
-        const isSuccessful = progress.successful_uploads.some(path => 
+        const isSuccessful = progress.successful_uploads.some(path =>
           path.includes(item.filename) || path === item.filePath
         );
-        
+
         if (isSuccessful) {
           item.status = 'success';
           item.progress = 100;
           item.error = null;
           return;
         }
-        
-        const failedUpload = progress.failed_uploads.find(failed => 
+
+        const failedUpload = progress.failed_uploads.find(failed =>
           failed.file_path.includes(item.filename) || failed.file_path === item.filePath
         );
-        
+
         if (failedUpload) {
           item.status = 'error';
           item.error = failedUpload.error || 'Upload failed';
           item.retryCount = failedUpload.retry_count || 0;
           return;
         }
-        
+
         if (progress.current_image) {
           if (progress.current_image.includes(item.filename) || progress.current_image === item.filePath) {
             item.status = 'uploading';
@@ -895,7 +1079,7 @@ class AppState {
             return;
           }
         }
-        
+
         if (progress.session_status === 'completed' && item.status === 'uploading') {
           item.status = 'success';
           item.progress = 100;
@@ -903,7 +1087,7 @@ class AppState {
         }
       }
     });
-    
+
     this.updateQueueDisplay();
     this.updateProgressSummary(progress);
   }
@@ -914,42 +1098,42 @@ class AppState {
     const progressCount = document.getElementById('progressCount');
     const progressFill = document.getElementById('overallProgressFill') as HTMLElement;
     const estimatedTime = document.getElementById('estimatedTime');
-    
+
     if (progressSummary && !progressSummary.classList.contains('hidden')) {
       if (progressText) {
-              if (progress.current_image) {
-                if (progress.current_image.includes(' - ')) {
-                  const [phase, filename] = progress.current_image.split(' - ');
-                  if (phase === 'Compressing') {
-                    progressText.textContent = `Optimizing ${filename} for Discord...`;
-                  } else if (phase === 'Uploading') {
-                    progressText.textContent = `Uploading ${filename}...`;
-                  } else if (phase === 'Preparing') {
-                    progressText.textContent = `Preparing ${filename}...`;
-                  } else if (phase === 'Loading metadata') {
-                    progressText.textContent = `Loading metadata for ${filename}...`;
-                  } else {
-                    progressText.textContent = progress.current_image;
-                  }
-                } else {
-                  const filename = progress.current_image.split(/[\\/]/).pop();
-                  progressText.textContent = `Uploading ${filename}...`;
-                }
-              } else {
-                progressText.textContent = 'Preparing uploads...';
-              }
+        if (progress.current_image) {
+          if (progress.current_image.includes(' - ')) {
+            const [phase, filename] = progress.current_image.split(' - ');
+            if (phase === 'Compressing') {
+              progressText.textContent = `Optimizing ${filename} for Discord...`;
+            } else if (phase === 'Uploading') {
+              progressText.textContent = `Uploading ${filename}...`;
+            } else if (phase === 'Preparing') {
+              progressText.textContent = `Preparing ${filename}...`;
+            } else if (phase === 'Loading metadata') {
+              progressText.textContent = `Loading metadata for ${filename}...`;
+            } else {
+              progressText.textContent = progress.current_image;
             }
-      
+          } else {
+            const filename = progress.current_image.split(/[\\/]/).pop();
+            progressText.textContent = `Uploading ${filename}...`;
+          }
+        } else {
+          progressText.textContent = 'Preparing uploads...';
+        }
+      }
+
       if (progressCount) {
         progressCount.textContent = `${progress.completed} / ${progress.total_images}`;
       }
-      
+
       if (progressFill) {
-        const percentage = progress.total_images > 0 ? 
+        const percentage = progress.total_images > 0 ?
           (progress.completed / progress.total_images) * 100 : 0;
         progressFill.style.width = `${percentage}%`;
       }
-      
+
       if (estimatedTime && progress.estimated_time_remaining) {
         const minutes = Math.floor(progress.estimated_time_remaining / 60);
         const seconds = progress.estimated_time_remaining % 60;
@@ -962,18 +1146,18 @@ class AppState {
   onUploadComplete(progress: UploadProgress) {
     const successCount = progress.successful_uploads.length;
     const failedCount = progress.failed_uploads.length;
-    
+
     console.log('Upload completed:', { successCount, failedCount, progress });
-    
+
     this.isUploading = false;
     console.log('Upload complete - setting isUploading = false');
-    
+
     this.uploadQueue.forEach(item => {
       if (item.selected && item.status === 'uploading') {
-        const isSuccessful = progress.successful_uploads.some(path => 
+        const isSuccessful = progress.successful_uploads.some(path =>
           path.includes(item.filename) || path === item.filePath
         );
-        
+
         if (isSuccessful) {
           item.status = 'success';
           item.progress = 100;
@@ -984,13 +1168,13 @@ class AppState {
         }
       }
     });
-    
+
     this.updateQueueDisplay();
-    
-    const hasGroupFailure = progress.failed_uploads.some(failure => 
+
+    const hasGroupFailure = progress.failed_uploads.some(failure =>
       failure.error.includes('[Group:')
     );
-    
+
     if (progress.session_status === 'cancelled') {
       this.showInfo('Upload was stopped by user');
     } else if (failedCount === 0) {
@@ -1001,8 +1185,8 @@ class AppState {
         progressText.textContent = 'Upload complete!';
       }
       this.showDesktopNotification(
-        'VRChat Photo Uploader', 
-        `Successfully uploaded ${successCount} files!`, 
+        'VRChat Photo Uploader',
+        `Successfully uploaded ${successCount} files!`,
         'success'
       );
     } else if (successCount === 0) {
@@ -1017,8 +1201,8 @@ class AppState {
         }
       }
       this.showDesktopNotification(
-        'Upload Failed', 
-        `Failed to upload ${failedCount} files`, 
+        'Upload Failed',
+        `Failed to upload ${failedCount} files`,
         'error'
       );
     } else {
@@ -1028,19 +1212,19 @@ class AppState {
         this.showWarning(`Uploaded ${successCount} files successfully, ${failedCount} failed.`);
       }
       this.showDesktopNotification(
-        'Upload Partially Complete', 
-        `${successCount} succeeded, ${failedCount} failed`, 
+        'Upload Partially Complete',
+        `${successCount} succeeded, ${failedCount} failed`,
         'info'
       );
     }
-    
+
     // Reset upload state
     this.resetUploadState();
-    
+
     const retryBtn = document.getElementById('retryFailed');
     if (retryBtn && failedCount > 0) {
       retryBtn.classList.remove('hidden');
-      
+
       if (hasGroupFailure) {
         retryBtn.textContent = '🔄 Retry Failed Group';
         retryBtn.title = 'Retry the entire failed group of images';
@@ -1061,7 +1245,7 @@ class AppState {
         filePath: item.filePath,
         webhookId: this.selectedWebhookId
       });
-      
+
       item.status = 'uploading';
       item.error = null;
       this.updateQueueDisplay();
@@ -1077,7 +1261,7 @@ class AppState {
     }
 
     const failedItems = this.uploadQueue.filter(item => item.status === 'error' && item.filePath);
-    
+
     if (failedItems.length === 0) {
       this.showWarning('No failed uploads to retry');
       return;
@@ -1086,22 +1270,22 @@ class AppState {
     const groupFailureMessages = failedItems
       .map(item => item.error)
       .filter(error => error && error.includes('[Group:'));
-    
+
     if (groupFailureMessages.length > 0) {
       this.showInfo(`Retrying failed group (${failedItems.length} images)...`);
-      
+
       failedItems.forEach(item => {
         item.status = 'queued';
         item.error = null;
         item.retryCount += 1;
         item.selected = true;
       });
-      
+
       this.updateQueueDisplay();
-      
+
       this.isUploading = false;
       await this.startUpload();
-      
+
     } else {
       for (const item of failedItems) {
         try {
@@ -1110,19 +1294,19 @@ class AppState {
             filePath: item.filePath,
             webhookId: this.selectedWebhookId
           });
-          
+
           item.status = 'uploading';
           item.error = null;
         } catch (error) {
           this.showError(`Failed to retry ${item.filename}: ${error}`);
         }
       }
-      
+
       this.updateQueueDisplay();
-      
+
       const retryBtn = document.getElementById('retryFailed');
       retryBtn?.classList.add('hidden');
-      
+
       if (this.currentUploadSession) {
         this.startProgressPolling(this.currentUploadSession);
       }
@@ -1183,7 +1367,7 @@ class AppState {
 
   async forceStopUpload() {
     console.log('Force stopping upload session:', this.currentUploadSession);
-    
+
     if (this.currentUploadSession) {
       try {
         await invoke('cancel_upload_session', {
@@ -1199,7 +1383,7 @@ class AppState {
       console.warn('No active session to cancel');
       this.showWarning('No active upload to stop');
     }
-    
+
     // Always reset local state
     this.resetUploadState();
   }
@@ -1271,7 +1455,7 @@ class ImagePreviewManager {
   setEnabled(enabled: boolean) {
     this.enabled = enabled;
     localStorage.setItem('image-preview-enabled', enabled.toString());
-    
+
     if (!enabled && this.currentPreview) {
       this.hidePreview();
     }
@@ -1283,7 +1467,7 @@ class ImagePreviewManager {
       if (e.key === 'Control' && !this.isCtrlPressed) {
         this.isCtrlPressed = true;
         this.updateCtrlHints(true);
-        
+
         // If we're hovering over an element, show preview immediately
         if (this.currentHoveredElement && this.currentHoveredData && this.enabled) {
           this.showPreview(
@@ -1329,44 +1513,44 @@ class ImagePreviewManager {
   }
 
   setupThumbnailPreview(thumbnailElement: HTMLElement, imagePath: string, filename: string, fileSize?: number, dimensions?: { width: number; height: number }) {
-      if (!this.enabled) return;
+    if (!this.enabled) return;
 
-      // Add hint element
-      const hint = document.createElement('div');
-      hint.className = 'ctrl-preview-hint';
-      hint.textContent = 'Preview';
-      thumbnailElement.style.position = 'relative';
-      thumbnailElement.appendChild(hint);
+    // Add hint element
+    const hint = document.createElement('div');
+    hint.className = 'ctrl-preview-hint';
+    hint.textContent = 'Preview';
+    thumbnailElement.style.position = 'relative';
+    thumbnailElement.appendChild(hint);
 
-      const handleMouseEnter = () => {
-        // Track what we're hovering over
-        this.currentHoveredElement = thumbnailElement;
-        this.currentHoveredData = { imagePath, filename, fileSize, dimensions };
-        
-        if (this.isCtrlPressed && this.enabled) {
-          this.showPreview(imagePath, filename, fileSize, dimensions);
-        }
-      };
+    const handleMouseEnter = () => {
+      // Track what we're hovering over
+      this.currentHoveredElement = thumbnailElement;
+      this.currentHoveredData = { imagePath, filename, fileSize, dimensions };
 
-      const handleMouseLeave = () => {
-        // Clear hover tracking
-        this.currentHoveredElement = null;
-        this.currentHoveredData = null;
-        this.hidePreview();
-      };
+      if (this.isCtrlPressed && this.enabled) {
+        this.showPreview(imagePath, filename, fileSize, dimensions);
+      }
+    };
 
-      thumbnailElement.addEventListener('mouseenter', handleMouseEnter);
-      thumbnailElement.addEventListener('mouseleave', handleMouseLeave);
+    const handleMouseLeave = () => {
+      // Clear hover tracking
+      this.currentHoveredElement = null;
+      this.currentHoveredData = null;
+      this.hidePreview();
+    };
 
-      // Store cleanup function for later removal
-      (thumbnailElement as any)._previewCleanup = () => {
-        thumbnailElement.removeEventListener('mouseenter', handleMouseEnter);
-        thumbnailElement.removeEventListener('mouseleave', handleMouseLeave);
-        if (hint.parentNode) {
-          hint.parentNode.removeChild(hint);
-        }
-      };
-    }
+    thumbnailElement.addEventListener('mouseenter', handleMouseEnter);
+    thumbnailElement.addEventListener('mouseleave', handleMouseLeave);
+
+    // Store cleanup function for later removal
+    (thumbnailElement as any)._previewCleanup = () => {
+      thumbnailElement.removeEventListener('mouseenter', handleMouseEnter);
+      thumbnailElement.removeEventListener('mouseleave', handleMouseLeave);
+      if (hint.parentNode) {
+        hint.parentNode.removeChild(hint);
+      }
+    };
+  }
 
   private showPreview(imagePath: string, filename: string, fileSize?: number, dimensions?: { width: number; height: number }) {
     if (!this.enabled) return;
@@ -1387,12 +1571,12 @@ class ImagePreviewManager {
     // Determine aspect ratio and set appropriate class
     if (dimensions) {
       const aspectRatio = dimensions.width / dimensions.height;
-      
+
       // VRChat standard aspect ratios
-      if (Math.abs(aspectRatio - (16/9)) < 0.1) {
+      if (Math.abs(aspectRatio - (16 / 9)) < 0.1) {
         // 16:9 landscape (most common VRChat screenshots)
         preview.classList.add('landscape-large');
-      } else if (Math.abs(aspectRatio - (9/16)) < 0.1) {
+      } else if (Math.abs(aspectRatio - (9 / 16)) < 0.1) {
         // 9:16 portrait (vertical screenshots)
         preview.classList.add('portrait');
       } else if (Math.abs(aspectRatio - 1) < 0.1) {
@@ -1423,15 +1607,15 @@ class ImagePreviewManager {
       const aspectRatio = dimensions.width / dimensions.height;
       const aspectDiv = document.createElement('div');
       aspectDiv.className = 'image-preview-aspect';
-      
-      if (Math.abs(aspectRatio - (16/9)) < 0.1) {
+
+      if (Math.abs(aspectRatio - (16 / 9)) < 0.1) {
         aspectDiv.textContent = '16:9 Landscape';
-      } else if (Math.abs(aspectRatio - (9/16)) < 0.1) {
+      } else if (Math.abs(aspectRatio - (9 / 16)) < 0.1) {
         aspectDiv.textContent = '9:16 Portrait';
       } else {
         aspectDiv.textContent = `${(aspectRatio).toFixed(2)}:1 Ratio`;
       }
-      
+
       info.appendChild(aspectDiv);
     }
 
@@ -1453,11 +1637,11 @@ class ImagePreviewManager {
 
   private positionPreview(preview: HTMLElement) {
     const { x, y } = this.mousePosition;
-    
+
     // Get preview dimensions based on aspect ratio class
     let previewWidth = 356;  // Default 16:9 landscape
     let previewHeight = 200;
-    
+
     if (preview.classList.contains('portrait')) {
       previewWidth = 225;   // 9:16 portrait
       previewHeight = 400;
@@ -1468,9 +1652,9 @@ class ImagePreviewManager {
       previewWidth = 300;   // Square
       previewHeight = 300;
     }
-    
+
     const offset = 20; // Distance from cursor
-    
+
     const viewport = {
       width: window.innerWidth,
       height: window.innerHeight
@@ -1611,18 +1795,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   listen('tauri://file-drop', async (event) => {
     const filePaths = event.payload as string[];
     console.log('Native drag & drop - files:', filePaths);
-    
+
     // Filter for image files only
     const imageFiles = filePaths.filter(path => {
       const ext = path.toLowerCase().split('.').pop();
       return ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(ext || '');
     });
-    
+
     if (imageFiles.length === 0) {
       state.showWarning('No valid image files were dropped');
       return;
     }
-    
+
     await state.addFilesToQueue(imageFiles);
     state.showSuccess(`Added ${imageFiles.length} images via drag & drop`);
   });
@@ -1637,12 +1821,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     total?: number;
     chunk_size?: number;
     progress?: number;
-    group_index?: number;
-    total_groups?: number;
     images_in_group?: number;
   }>('upload-item-progress', (event) => {
     const data = event.payload;
     const updatedItems: string[] = [];
+
+    // If it's a background session (doesn't match current manual session),
+    // update the background panel instead of the main queue.
+    const isBackground = data.session_id && data.session_id !== state.getCurrentSessionId();
+
+    if (isBackground) {
+      state.updateBackgroundPanelFromItem(data);
+      return;
+    }
 
     // Update individual queue items based on phase
     if (data.file_path) {
@@ -1715,17 +1906,34 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
 
-    // Apply lightweight UI updates for changed items
     for (const itemId of updatedItems) {
       state.updateQueueItemProgress(itemId);
     }
+  });
 
-    // Update main progress summary for group events
-    if (data.phase === 'group_start' && data.total_groups) {
-      const progressText = document.getElementById('progressText');
-      if (progressText) {
-        progressText.textContent = `Processing group ${(data.group_index || 0) + 1} of ${data.total_groups}...`;
-      }
+  listen<UploadProgress & { session_id: string }>('upload-progress', (event) => {
+    const data = event.payload;
+    const isBackground = data.session_id && data.session_id !== state.getCurrentSessionId();
+
+    if (isBackground) {
+      state.updateBackgroundPanelFromProgress(data);
+    } else {
+      state.updateProgressFromSession(data);
+    }
+  });
+
+  // Background Panel Close Logic
+  const closeBackgroundPanel = document.getElementById('closeBackgroundPanel');
+  closeBackgroundPanel?.addEventListener('click', () => {
+    document.getElementById('backgroundUploadPanel')?.classList.add('hidden');
+  });
+
+  // Manual Trigger for Background Panel
+  const viewBackgroundQueueBtn = document.getElementById('viewBackgroundQueueBtn');
+  viewBackgroundQueueBtn?.addEventListener('click', () => {
+    const panel = document.getElementById('backgroundUploadPanel');
+    if (panel) {
+      panel.classList.toggle('hidden');
     }
   });
 
@@ -1740,7 +1948,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
         }]
       });
-      
+
       if (selected && Array.isArray(selected)) {
         await state.addFilesToQueue(selected);
         state.showSuccess(`Added ${selected.length} files from tray menu`);
@@ -1765,8 +1973,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   listen('show-metadata-editor', () => {
-  console.log('Tray: Metadata Editor requested');
-  ModalManager.openModal('metadataEditorModal');
+    console.log('Tray: Metadata Editor requested');
+    ModalManager.openModal('metadataEditorModal');
   });
 
   // System tray VRChat folder
@@ -1785,22 +1993,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (e) {
           console.warn('Failed to show/focus window:', e);
         }
-        
+
         const selected = await open({
           directory: true,
           title: 'Select VRChat Photos Folder'
         });
-        
+
         if (selected && typeof selected === 'string') {
           selectedVRChatFolder = selected;
           localStorage.setItem('vrchat-folder-path', selected);
           state.showSuccess(`Selected VRChat folder: ${selected}`);
-          
+
           const openVRChatFolderBtn = document.getElementById('openVRChatFolderBtn');
           if (openVRChatFolderBtn) {
             openVRChatFolderBtn.innerHTML = '📂 Open VRChat Folder';
           }
-          
+
           await invoke('shell_open', { path: selected });
         }
       }
@@ -1813,13 +2021,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Listen for global shortcut events
   listen('global-shortcut-upload', async () => {
     console.log('Global shortcut triggered: Upload files');
-    
+
     const globalShortcutsEnabled = localStorage.getItem('global-shortcuts-enabled') !== 'false';
     if (!globalShortcutsEnabled) {
       console.log('Global shortcuts are disabled, ignoring shortcut');
       return;
     }
-    
+
     try {
       const selected = await open({
         multiple: true,
@@ -1828,7 +2036,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
         }]
       });
-      
+
       if (selected && Array.isArray(selected)) {
         console.log('Selected files via global shortcut:', selected);
         await state.addFilesToQueue(selected);
@@ -1853,7 +2061,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       updateStatus.innerHTML = `✅ Update available: v${event.payload.version}<br><small>The update will be installed automatically.</small>`;
       updateStatus.className = 'update-status success';
     }
-    
+
     // Show notification
     new Notification('Update Available', {
       body: `VRChat Photo Uploader v${event.payload.version} is available and will be installed automatically.`,
@@ -1886,7 +2094,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const target = e.target as HTMLInputElement;
     const enabled = target.checked;
     previewManager.setEnabled(enabled);
-    
+
     if (enabled) {
       state.showSuccess('Image previews enabled (Ctrl+Hover)');
     } else {
@@ -1973,7 +2181,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const nameInput = document.getElementById('webhookName') as HTMLInputElement;
     const urlInput = document.getElementById('webhookUrl') as HTMLInputElement;
     const addBtn = document.getElementById('addWebhookBtn');
-    
+
     if (nameInput) nameInput.value = '';
     if (urlInput) urlInput.value = '';
     if (addBtn) {
@@ -1989,27 +2197,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   addWebhookBtn?.addEventListener('click', async () => {
     const nameInput = document.getElementById('webhookName') as HTMLInputElement;
     const urlInput = document.getElementById('webhookUrl') as HTMLInputElement;
+    const isForumCheckbox = document.getElementById('isForum') as HTMLInputElement;
     const addBtn = addWebhookBtn;
-    
+
     if (!nameInput.value.trim() || !urlInput.value.trim()) {
       state.showError('Please enter both name and URL');
       return;
     }
 
     const editingId = addBtn.dataset.editingId;
-    
+
     if (editingId) {
       await state.updateWebhook(
-        parseInt(editingId), 
-        nameInput.value.trim(), 
+        parseInt(editingId),
+        nameInput.value.trim(),
         urlInput.value.trim()
       );
     } else {
       await state.addWebhook(
-        nameInput.value.trim(), 
+        nameInput.value.trim(),
         urlInput.value.trim()
       );
-      
+
       // Reset selection after adding new webhook
       state.selectedWebhookId = null;
     }
@@ -2019,10 +2228,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     urlInput.value = '';
     addBtn.textContent = '➕ Add Webhook';
     delete addBtn.dataset.editingId;
-    
+
     const existingSelect = document.getElementById('existingWebhooks') as HTMLSelectElement;
     if (existingSelect) existingSelect.value = '';
-    
+
     ModalManager.closeModal('webhookModal');
   });
 
@@ -2031,10 +2240,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   existingWebhooksSelect?.addEventListener('change', (e) => {
     const target = e.target as HTMLSelectElement;
     const selectedId = target.value;
-    
+
     const deleteBtn = document.getElementById('deleteWebhookBtn') as HTMLButtonElement;
     const editBtn = document.getElementById('editWebhookBtn') as HTMLButtonElement;
-    
+
     if (deleteBtn) deleteBtn.disabled = !selectedId;
     if (editBtn) editBtn.disabled = !selectedId;
   });
@@ -2044,7 +2253,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   deleteWebhookBtn?.addEventListener('click', async () => {
     const existingSelect = document.getElementById('existingWebhooks') as HTMLSelectElement;
     const selectedId = existingSelect.value;
-    
+
     if (!selectedId) {
       state.showError('Please select a webhook to delete');
       return;
@@ -2068,7 +2277,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   editWebhookBtn?.addEventListener('click', () => {
     const existingSelect = document.getElementById('existingWebhooks') as HTMLSelectElement;
     const selectedId = existingSelect.value;
-    
+
     if (!selectedId) {
       state.showError('Please select a webhook to edit');
       return;
@@ -2079,9 +2288,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const nameInput = document.getElementById('webhookName') as HTMLInputElement;
     const urlInput = document.getElementById('webhookUrl') as HTMLInputElement;
+    const isForumCheckbox = document.getElementById('isForum') as HTMLInputElement;
 
     if (nameInput) nameInput.value = selectedWebhook.name;
     if (urlInput) urlInput.value = selectedWebhook.url;
+    if (isForumCheckbox) isForumCheckbox.checked = selectedWebhook.is_forum;
 
     const addBtn = document.getElementById('addWebhookBtn');
     if (addBtn) {
@@ -2104,7 +2315,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
         }]
       });
-      
+
       if (selected && Array.isArray(selected)) {
         console.log('Selected files via dialog:', selected);
         await state.addFilesToQueue(selected);
@@ -2143,9 +2354,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     e.preventDefault();
     e.stopPropagation();
     dropZone.classList.remove('dragover');
-    
+
     state.showInfo('Drag & drop detected! Please use the file dialog to select your images.');
-    
+
     try {
       const selected = await open({
         multiple: true,
@@ -2154,7 +2365,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
         }]
       });
-      
+
       if (selected && Array.isArray(selected)) {
         console.log('Selected files via drag & drop dialog:', selected);
         await state.addFilesToQueue(selected);
@@ -2188,7 +2399,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (startUploadBtn) {
     const newStartBtn = startUploadBtn.cloneNode(true) as HTMLButtonElement;
     startUploadBtn.parentNode?.replaceChild(newStartBtn, startUploadBtn);
-    
+
     newStartBtn.addEventListener('click', () => {
       console.log('Start upload button clicked');
       state.startUpload();
@@ -2204,17 +2415,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Clone to remove old listeners
     const newPauseBtn = pauseUploadBtn.cloneNode(true) as HTMLButtonElement;
     pauseUploadBtn.parentNode?.replaceChild(newPauseBtn, pauseUploadBtn);
-    
+
     newPauseBtn.addEventListener('click', async () => {
       console.log('Pause/Stop button clicked');
-      
+
       try {
         // Show immediate feedback
         newPauseBtn.disabled = true;
         newPauseBtn.textContent = '⏹️ Stopping...';
-        
+
         await state.forceStopUpload();
-        
+
         // Button will be hidden by resetUploadState, but just in case:
         newPauseBtn.disabled = false;
         newPauseBtn.textContent = '⏹️ Stop';
@@ -2248,12 +2459,12 @@ document.addEventListener('DOMContentLoaded', async () => {
           directory: true,
           title: 'Select VRChat Photos Folder'
         });
-        
+
         if (selected && typeof selected === 'string') {
           selectedVRChatFolder = selected;
           localStorage.setItem('vrchat-folder-path', selected);
           state.showSuccess(`Selected VRChat folder: ${selected}`);
-          
+
           if (openVRChatFolderBtn) {
             openVRChatFolderBtn.innerHTML = '📂 Open VRChat Folder';
           }
@@ -2281,6 +2492,68 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (compressionFormat && config.compression_format) {
         compressionFormat.value = config.compression_format;
       }
+
+      const autoUploadCheck = document.getElementById('enableAutoUpload') as HTMLInputElement;
+      if (autoUploadCheck) autoUploadCheck.checked = config.enable_auto_upload || false;
+
+      const autoUploadSelect = document.getElementById('autoUploadWebhook') as HTMLSelectElement;
+      if (autoUploadSelect) {
+        autoUploadSelect.innerHTML = '<option value="">Select Webhook...</option>';
+        // Assuming state is accessible here via closure or global. state is available in this scope.
+        // Wait, 'state' variable is defined where? 'const state = new AppState();' usually. 
+        // In the snippet, it's inside 'document.addEventListener("DOMContentLoaded", ...)'
+        // 'state' is defined at top of that block. Yes.
+        state.webhooks.forEach(w => {
+          const opt = document.createElement('option');
+          opt.value = w.id.toString();
+          opt.textContent = w.name;
+          autoUploadSelect.appendChild(opt);
+        });
+        if (config.auto_upload_webhook_id) {
+          autoUploadSelect.value = config.auto_upload_webhook_id.toString();
+        }
+      }
+
+      // Populate new settings
+      const singleThreadMode = document.getElementById('singleThreadMode') as HTMLInputElement;
+      if (singleThreadMode) singleThreadMode.checked = config.single_thread_mode;
+
+      const mergeNoMetadata = document.getElementById('mergeNoMetadata') as HTMLInputElement;
+      if (mergeNoMetadata) mergeNoMetadata.checked = config.merge_no_metadata;
+
+      const autoUploadBatchSize = document.getElementById('autoUploadBatchSize') as HTMLInputElement;
+      if (autoUploadBatchSize) autoUploadBatchSize.value = (config.auto_upload_batch_size || 10).toString();
+
+      const autoUploadDelay = document.getElementById('autoUploadDelay') as HTMLInputElement;
+      if (autoUploadDelay) autoUploadDelay.value = (config.auto_upload_delay_seconds || 5).toString();
+
+      const autoUploadForumChannel = document.getElementById('autoUploadForumChannel') as HTMLInputElement;
+      if (autoUploadForumChannel) autoUploadForumChannel.checked = config.auto_upload_forum_channel ?? true;
+
+      const autoUploadSingleThread = document.getElementById('autoUploadSingleThread') as HTMLInputElement;
+      if (autoUploadSingleThread) autoUploadSingleThread.checked = config.auto_upload_single_thread ?? false;
+
+      const autoUploadGroupByMetadata = document.getElementById('autoUploadGroupByMetadata') as HTMLInputElement;
+      if (autoUploadGroupByMetadata) autoUploadGroupByMetadata.checked = config.auto_upload_group_by_metadata ?? true;
+
+      const autoUploadGroupByWorld = document.getElementById('autoUploadGroupByWorld') as HTMLInputElement;
+      if (autoUploadGroupByWorld) autoUploadGroupByWorld.checked = config.auto_upload_group_by_world ?? true;
+
+      const autoUploadGroupByTime = document.getElementById('autoUploadGroupByTime') as HTMLInputElement;
+      if (autoUploadGroupByTime) autoUploadGroupByTime.checked = config.auto_upload_group_by_time ?? true;
+
+      const autoUploadTimeWindow = document.getElementById('autoUploadTimeWindow') as HTMLInputElement;
+      if (autoUploadTimeWindow) autoUploadTimeWindow.value = (config.auto_upload_time_window || 60).toString();
+
+      const autoUploadIncludePlayers = document.getElementById('autoUploadIncludePlayers') as HTMLInputElement;
+      if (autoUploadIncludePlayers) autoUploadIncludePlayers.checked = config.auto_upload_include_players ?? true;
+
+      const autoUploadMergeNoMetadata = document.getElementById('autoUploadMergeNoMetadata') as HTMLInputElement;
+      if (autoUploadMergeNoMetadata) autoUploadMergeNoMetadata.checked = config.auto_upload_merge_no_metadata ?? false;
+
+      // Update sub-options visibility
+      updateAutoUploadGroupingVisibility();
+
     } catch (error) {
       console.error('Failed to load config:', error);
     }
@@ -2332,13 +2605,13 @@ document.addEventListener('DOMContentLoaded', async () => {
           extensions: ['png']
         }]
       });
-      
+
       if (selected && typeof selected === 'string') {
         // Show loading state
         const originalText = loadPngMetadataBtn.innerHTML;
         loadPngMetadataBtn.innerHTML = '🔄 Loading Metadata...';
         (loadPngMetadataBtn as HTMLButtonElement).disabled = true;
-        
+
         try {
           await loadPngMetadata(selected);
         } finally {
@@ -2359,12 +2632,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadRawJsonBtn?.addEventListener('click', () => {
     const rawJsonText = document.getElementById('rawJsonText') as HTMLTextAreaElement;
     const rawJson = rawJsonText.value.trim();
-    
+
     if (!rawJson) {
       state.showError('No raw JSON provided');
       return;
     }
-    
+
     try {
       const metadata = JSON.parse(rawJson);
       populateFormFields(metadata);
@@ -2383,7 +2656,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           extensions: ['png']
         }]
       });
-      
+
       if (selected && typeof selected === 'string') {
         selectedPngPath = selected;
         const filename = selected.split(/[\\/]/).pop() || selected;
@@ -2391,10 +2664,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (selectedPngInfo) {
           selectedPngInfo.textContent = `Selected for embedding: ${filename}`;
         }
-        
+
         const embedBtn = document.getElementById('embedMetadataBtn') as HTMLButtonElement;
         if (embedBtn) embedBtn.disabled = false;
-        
+
         state.showSuccess(`Selected PNG for embedding: ${filename}`);
       }
     } catch (error) {
@@ -2408,7 +2681,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       state.showError('No PNG file selected for embedding');
       return;
     }
-    
+
     // Show loading state
     const originalText = embedMetadataBtn.innerHTML;
     embedMetadataBtn.innerHTML = '🔄 Embedding Metadata...';
@@ -2444,18 +2717,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       // Extract metadata using your existing command
       const metadata = await invoke('get_image_metadata', { filePath });
-      
+
       if (!metadata) {
         state.showError('No metadata found in the PNG file');
         return;
       }
-      
+
       // Get file info for timestamps
       try {
         const [width, height, fileSize] = await invoke('get_image_info', { filePath }) as [number, number, number];
         // Extract creation time from filename
         originalCreationTime = extractCreationTimeFromFilename(filePath);
-        
+
         const creationDateSpan = document.getElementById('creationDate');
         if (creationDateSpan && originalCreationTime) {
           const date = new Date(originalCreationTime * 1000);
@@ -2464,18 +2737,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       } catch (error) {
         console.warn('Could not get file info:', error);
       }
-      
+
       // Populate form fields
       populateFormFields(metadata);
-      
+
       // Update raw JSON display
       const rawJsonText = document.getElementById('rawJsonText') as HTMLTextAreaElement;
       if (rawJsonText) {
         rawJsonText.value = JSON.stringify(metadata, null, 2);
       }
-      
+
       state.showSuccess('Loaded metadata and timestamps');
-      
+
     } catch (error) {
       state.showError(`Error loading PNG metadata: ${error}`);
     }
@@ -2485,17 +2758,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Author fields
     const authorDisplayName = document.getElementById('authorDisplayName') as HTMLInputElement;
     const authorId = document.getElementById('authorId') as HTMLInputElement;
-    
+
     if (metadata.author) {
       if (authorDisplayName) authorDisplayName.value = metadata.author.display_name || metadata.author.displayName || '';
       if (authorId) authorId.value = metadata.author.id || '';
     }
-    
+
     // World fields
     const worldName = document.getElementById('worldName') as HTMLInputElement;
     const worldId = document.getElementById('worldId') as HTMLInputElement;
     const worldInstanceId = document.getElementById('worldInstanceId') as HTMLInputElement;
-    
+
     if (metadata.world) {
       if (worldName) worldName.value = metadata.world.name || '';
       if (worldId) worldId.value = metadata.world.id || '';
@@ -2513,12 +2786,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   function extractCreationTimeFromFilename(filePath: string): number | null {
     const filename = filePath.split(/[\\/]/).pop() || '';
     const match = filename.match(/(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2}(?:\.\d+)?)/);
-    
+
     if (match) {
       const [, datePart, timePart] = match;
       const timeFormatted = timePart.replace(/-/g, ':');
       const dateTimeStr = `${datePart} ${timeFormatted}`;
-      
+
       try {
         const date = new Date(dateTimeStr);
         return Math.floor(date.getTime() / 1000);
@@ -2526,8 +2799,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.warn('Failed to parse creation time from filename:', error);
       }
     }
-    
     return null;
+  }
+
+  function updateAutoUploadGroupingVisibility() {
+    const groupByMetadata = document.getElementById('autoUploadGroupByMetadata') as HTMLInputElement;
+    const groupingOptions = document.getElementById('autoUploadGroupingOptions');
+    if (groupByMetadata && groupingOptions) {
+      groupingOptions.style.display = groupByMetadata.checked ? 'block' : 'none';
+    }
+  }
+
+  // Add event listener for auto-upload grouping toggle
+  const autoUploadGroupByMetadata = document.getElementById('autoUploadGroupByMetadata') as HTMLInputElement;
+  if (autoUploadGroupByMetadata) {
+    autoUploadGroupByMetadata.addEventListener('change', updateAutoUploadGroupingVisibility);
   }
 
   async function embedMetadataIntoPng() {
@@ -2535,7 +2821,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       state.showError('No PNG file selected');
       return;
     }
-    
+
     // Gather metadata from form fields
     const authorDisplayName = (document.getElementById('authorDisplayName') as HTMLInputElement).value.trim();
     const authorId = (document.getElementById('authorId') as HTMLInputElement).value.trim();
@@ -2543,7 +2829,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const worldId = (document.getElementById('worldId') as HTMLInputElement).value.trim();
     const worldInstanceId = (document.getElementById('worldInstanceId') as HTMLInputElement).value.trim();
     const playersText = (document.getElementById('playersText') as HTMLTextAreaElement).value.trim();
-    
+
     // Parse players
     interface Player {
       displayName: string;
@@ -2561,7 +2847,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
     }
-    
+
     // Create metadata object
     const metadata = {
       application: "VRChat Photo Uploader",
@@ -2571,31 +2857,31 @@ document.addEventListener('DOMContentLoaded', async () => {
       world: worldName && worldId ? { name: worldName, id: worldId, instance_id: worldInstanceId } : null,
       players: players.map(p => ({ display_name: p.displayName, id: p.id }))
     };
-    
+
     // Remove null values
     Object.keys(metadata).forEach(key => {
       if (metadata[key as keyof typeof metadata] === null) {
         delete metadata[key as keyof typeof metadata];
       }
     });
-    
+
     try {
       // Use the update_image_metadata command to embed metadata
       const outputPath = await invoke('update_image_metadata', {
         filePath: selectedPngPath,
         metadata: metadata
       }) as string;
-      
+
       state.showSuccess(`Metadata embedded successfully! Saved as: ${outputPath.split(/[\\/]/).pop()}`);
-      
+
       // Reset the form
       selectedPngPath = null;
       const embedBtn = document.getElementById('embedMetadataBtn') as HTMLButtonElement;
       if (embedBtn) embedBtn.disabled = true;
-      
+
       const selectedPngInfo = document.getElementById('selectedPngInfo');
       if (selectedPngInfo) selectedPngInfo.textContent = '';
-      
+
     } catch (error) {
       state.showError(`Failed to embed metadata: ${error}`);
     }
@@ -2641,11 +2927,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   enableNotifications?.addEventListener('change', (e) => {
     const target = e.target as HTMLInputElement;
     state.setNotificationsEnabled(target.checked);
-    
+
     if (target.checked) {
       state.showDesktopNotification(
-        'Notifications Enabled', 
-        'You will now receive desktop notifications for uploads', 
+        'Notifications Enabled',
+        'You will now receive desktop notifications for uploads',
         'success'
       );
     }
@@ -2657,7 +2943,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const target = e.target as HTMLInputElement;
     const enabled = target.checked;
     localStorage.setItem('global-shortcuts-enabled', enabled.toString());
-    
+
     if (enabled) {
       state.showSuccess('Global shortcuts enabled (Ctrl+Shift+U)');
     } else {
@@ -2691,10 +2977,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         auto_compress_threshold: 8,
         upload_quality: 85,
         compression_format: compressionFormat?.value || 'webp',
+        enable_auto_upload: (document.getElementById('enableAutoUpload') as HTMLInputElement)?.checked,
+        auto_upload_webhook_id: parseInt((document.getElementById('autoUploadWebhook') as HTMLSelectElement)?.value || '0') || undefined,
+        vrchat_path: selectedVRChatFolder || undefined,
+        single_thread_mode: (document.getElementById('singleThreadMode') as HTMLInputElement)?.checked || false,
+        merge_no_metadata: (document.getElementById('mergeNoMetadata') as HTMLInputElement)?.checked || false,
+        auto_upload_delay_seconds: parseInt((document.getElementById('autoUploadDelay') as HTMLInputElement)?.value || '5'),
+        auto_upload_batch_size: parseInt((document.getElementById('autoUploadBatchSize') as HTMLInputElement)?.value || '10'),
+        auto_upload_forum_channel: (document.getElementById('autoUploadForumChannel') as HTMLInputElement)?.checked ?? true,
+        auto_upload_single_thread: (document.getElementById('autoUploadSingleThread') as HTMLInputElement)?.checked ?? false,
+        auto_upload_group_by_metadata: (document.getElementById('autoUploadGroupByMetadata') as HTMLInputElement)?.checked ?? true,
+        auto_upload_group_by_world: (document.getElementById('autoUploadGroupByWorld') as HTMLInputElement)?.checked ?? true,
+        auto_upload_group_by_time: (document.getElementById('autoUploadGroupByTime') as HTMLInputElement)?.checked ?? true,
+        auto_upload_time_window: parseInt((document.getElementById('autoUploadTimeWindow') as HTMLInputElement)?.value || '60'),
+        auto_upload_include_players: (document.getElementById('autoUploadIncludePlayers') as HTMLInputElement)?.checked ?? true,
+        auto_upload_merge_no_metadata: (document.getElementById('autoUploadMergeNoMetadata') as HTMLInputElement)?.checked ?? false
       };
 
       await invoke('save_app_config', { config });
-      
+
       state.showSuccess('Settings saved successfully!');
       ModalManager.closeModal('settingsModal');
     } catch (error) {
@@ -2712,12 +3013,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   clearVRChatFolderBtn?.addEventListener('click', () => {
     localStorage.removeItem('vrchat-folder-path');
     selectedVRChatFolder = null;
-    
+
     const openVRChatFolderBtn = document.getElementById('openVRChatFolderBtn');
     if (openVRChatFolderBtn) {
       openVRChatFolderBtn.innerHTML = '📂 Select VRChat Folder';
     }
-    
+
     updateVRChatFolderDisplay();
     state.showSuccess('VRChat folder location cleared');
   });
@@ -2725,14 +3026,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   function updateVRChatFolderDisplay() {
     const currentPathSpan = document.getElementById('currentVRChatPath');
     const clearBtn = document.getElementById('clearVRChatFolderBtn') as HTMLButtonElement;
-    
+
     if (!currentPathSpan) {
       console.warn('currentVRChatPath element not found - settings modal may not be open');
       return;
     }
-    
+
     if (selectedVRChatFolder) {
-      const shortPath = selectedVRChatFolder.length > 50 
+      const shortPath = selectedVRChatFolder.length > 50
         ? '...' + selectedVRChatFolder.slice(-47)
         : selectedVRChatFolder;
       currentPathSpan.textContent = shortPath;
@@ -2746,6 +3047,138 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   updateVRChatFolderDisplay();
-  
+
+  // --- New Features Logic ---
+
+  // Remove Successful Button
+  const removeSuccessfulBtn = document.getElementById('removeSuccessfulBtn');
+  removeSuccessfulBtn?.addEventListener('click', () => {
+    state.removeSuccessfulItems();
+  });
+
+  // User Webhook Overrides Logic
+  async function loadUserOverrides() {
+    try {
+      const overrides = await invoke<UserWebhookOverride[]>('get_user_webhook_overrides');
+      const listContainer = document.getElementById('overridesList');
+      if (!listContainer) return;
+
+      listContainer.innerHTML = '';
+
+      if (overrides.length === 0) {
+        listContainer.innerHTML = '<div style="color: var(--text-muted); padding: 5px; font-style: italic;">No overrides configured.</div>';
+        return;
+      }
+
+      const table = document.createElement('table');
+      table.style.width = '100%';
+      table.style.borderCollapse = 'collapse';
+      table.style.fontSize = '0.9rem';
+
+      overrides.forEach(ov => {
+        const webhook = state.webhooks.find(w => w.id === ov.webhook_id);
+        const webhookName = webhook ? webhook.name : `Unknown (${ov.webhook_id})`;
+        const label = ov.user_display_name || ov.user_id || 'Unknown';
+
+        const row = document.createElement('tr');
+        row.style.borderBottom = '1px solid var(--border-color)';
+        row.innerHTML = `
+          <td style="padding: 4px;"><strong>${label}</strong></td>
+          <td style="padding: 4px;">→</td>
+          <td style="padding: 4px;">${webhookName}</td>
+          <td style="padding: 4px; text-align: right;">
+            <button class="btn btn-small btn-secondary delete-override-btn" data-id="${ov.id}">🗑️</button>
+          </td>
+        `;
+        table.appendChild(row);
+      });
+
+      listContainer.appendChild(table);
+
+      // Bind delete buttons
+      document.querySelectorAll('.delete-override-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const id = parseInt((e.target as HTMLElement).dataset.id || '0');
+          if (id > 0) {
+            try {
+              await invoke('delete_user_webhook_override', { id });
+              loadUserOverrides(); // Refresh
+            } catch (err) {
+              state.showError(`Failed to delete override: ${err}`);
+            }
+          }
+        });
+      });
+
+    } catch (error) {
+      console.error('Failed to load overrides:', error);
+    }
+  }
+
+  // Populate override webhook select
+  function updateOverrideWebhookSelect() {
+    const select = document.getElementById('overrideWebhookSelect') as HTMLSelectElement;
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Select Webhook...</option>';
+    state.webhooks.forEach(w => {
+      const opt = document.createElement('option');
+      opt.value = w.id.toString();
+      opt.textContent = w.name;
+      select.appendChild(opt);
+    });
+  }
+
+  // Hook into Manage Webhooks opening
+  const manageWebhooksBtnOverride = document.getElementById('manageWebhooksBtn');
+  manageWebhooksBtnOverride?.addEventListener('click', () => {
+    // Standard modal opening is handled elsewhere or implicitly? 
+    // We just want to refresh data
+    ModalManager.openModal('webhookModal');
+    updateOverrideWebhookSelect();
+    loadUserOverrides();
+  });
+
+  const addOverrideBtn = document.getElementById('addOverrideBtn');
+  addOverrideBtn?.addEventListener('click', async () => {
+    const userInput = document.getElementById('overrideUserInput') as HTMLInputElement;
+    const webhookSelect = document.getElementById('overrideWebhookSelect') as HTMLSelectElement;
+
+    const userIdentifier = userInput.value.trim();
+    const webhookId = parseInt(webhookSelect.value);
+
+    if (!userIdentifier) {
+      state.showError('Please enter a User Name or ID');
+      return;
+    }
+    if (!webhookId) {
+      state.showError('Please select a webhook');
+      return;
+    }
+
+    let userId = null;
+    let userDisplayName = null;
+
+    if (userIdentifier.startsWith('usr_')) {
+      userId = userIdentifier;
+    } else {
+      userDisplayName = userIdentifier;
+    }
+
+    try {
+      await invoke('add_user_webhook_override', {
+        userId,
+        userDisplayName,
+        webhookId
+      });
+
+      userInput.value = '';
+      loadUserOverrides();
+      state.showSuccess(`Linked ${userIdentifier} to webhook!`);
+    } catch (error) {
+      state.showError(`Failed to add override: ${error}`);
+    }
+  });
+
   console.log('App initialized successfully');
 });

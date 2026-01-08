@@ -566,9 +566,10 @@ fn extract_vrchat_xmp_metadata(file_path: &str) -> AppResult<Option<ImageMetadat
 
     // Also try to read raw XMP data from the file
     // Some tools embed XMP directly without proper chunk structure
-    if let Some(metadata) = try_extract_raw_xmp(file_path)? {
-        return Ok(Some(metadata));
-    }
+    // OPTIMIZATION: Disabled for batch processing as it reads the entire file
+    // if let Some(metadata) = try_extract_raw_xmp(file_path)? {
+    //     return Ok(Some(metadata));
+    // }
 
     Ok(None)
 }
@@ -957,38 +958,165 @@ fn extract_metadata_from_filename(file_path: &str) -> AppResult<Option<ImageMeta
 }
 
 pub async fn compress_image(file_path: &str, quality: u8) -> AppResult<String> {
-    // Load config to get compression format preference
-    let format = crate::config::load_config()
-        .map(|c| c.compression_format)
-        .unwrap_or_else(|_| "webp".to_string());
+    let config = crate::config::load_config().map_err(|e| AppError::Config(e.to_string()))?;
+    let format = config.compression_format;
+    // Smart PNG Logic: If Format is PNG and file size > 10MB, resize to 50%
 
-    compress_image_with_format(file_path, quality, &format).await
+    if format == "png" {
+        let file_size = FileSystemGuard::get_file_size(file_path)?;
+        if file_size > 10 * 1024 * 1024 {
+            log::info!(
+                "Smart PNG: File {} is {:.2} MB (initial), resizing to 50%",
+                file_path,
+                file_size as f64 / 1024.0 / 1024.0
+            );
+            let resized_path = resize_image_simple(file_path, 0.5).await?;
+            return Ok(resized_path);
+        }
+    }
+
+    compress_image_with_format(file_path, quality, &format, None).await
+}
+
+pub async fn resize_image_simple(file_path: &str, scale: f32) -> AppResult<String> {
+    InputValidator::validate_image_file(file_path)?;
+    let img = load_image_efficiently(file_path)?;
+
+    let new_width = (img.width() as f32 * scale) as u32;
+    let new_height = (img.height() as f32 * scale) as u32;
+
+    log::info!(
+        "Resizing image to {}x{} (scale {:.2})",
+        new_width,
+        new_height,
+        scale
+    );
+
+    // Use Triangle (bilinear) as a fast "box-like" filter
+    let resized = img.resize_exact(new_width, new_height, image::imageops::FilterType::Triangle);
+
+    let temp_path = FileSystemGuard::create_secure_temp_file(file_path)?;
+    let output_path = temp_path.with_extension("png"); // Always save resized intermediate as PNG for quality
+
+    resized
+        .save_with_format(&output_path, image::ImageFormat::Png)
+        .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
+
+    Ok(output_path.to_string_lossy().to_string())
 }
 
 pub async fn compress_image_with_format(
     file_path: &str,
     quality: u8,
     format: &str,
+    scale: Option<f32>,
 ) -> AppResult<String> {
     // Validate inputs
     InputValidator::validate_image_file(file_path)?;
 
-    if quality == 0 || quality > 100 {
-        return Err(AppError::validation(
-            "quality",
-            "Quality must be between 1 and 100",
-        ));
+    // Handle scaling first
+    let mut current_path = file_path.to_string();
+    let mut intermediate_temp = None;
+
+    if let Some(s) = scale {
+        if (s - 1.0).abs() > f32::EPSILON {
+            log::info!("Applying resolution scale: {:.2}x", s);
+            let resized_path = resize_image_simple(file_path, s).await?;
+            current_path = resized_path.clone();
+            intermediate_temp = Some(resized_path);
+        }
     }
 
-    // Load image with memory-efficient loading for large files
-    let img = load_image_efficiently(file_path)?;
+    // Call internal logic
+    let result = compress_image_with_format_internal(&current_path, quality, format).await;
 
+    // Cleanup intermediate resized file if any
+    if let Some(path) = intermediate_temp {
+        tokio::fs::remove_file(&path).await.ok();
+    }
+
+    result
+}
+
+async fn compress_image_with_format_internal(
+    file_path: &str,
+    quality: u8,
+    format: &str,
+) -> AppResult<String> {
     // Create output path in secure temp directory
     let temp_path = FileSystemGuard::create_secure_temp_file(file_path)?;
 
-    // Choose format based on setting
-    if format == "jpg" {
+    if format == "png_smart" {
+        let file_size = FileSystemGuard::get_file_size(file_path)?;
+        const SMART_RESIZE_THRESHOLD: u64 = 10 * 1024 * 1024; // 10MB
+
+        if file_size > SMART_RESIZE_THRESHOLD {
+            log::info!(
+                "Smart PNG: File size {} > 10MB, applying Box resizing (50%)",
+                file_size
+            );
+            return resize_image_box(file_path, 0.5).await;
+        } else {
+            // Check if it's already a PNG to avoid re-encoding
+            let is_already_png = file_path.to_lowercase().ends_with(".png");
+            let output_path = temp_path.with_extension("png");
+
+            if is_already_png {
+                log::info!(
+                    "Smart PNG: File size {} <= 10MB and already PNG, fast-copying",
+                    file_size
+                );
+                tokio::fs::copy(file_path, &output_path)
+                    .await
+                    .map_err(|e| AppError::Io(e))?;
+            } else {
+                log::info!(
+                    "Smart PNG: File size {} <= 10MB but not PNG, converting",
+                    file_size
+                );
+                let img = load_image_efficiently(file_path)?;
+                img.save_with_format(&output_path, image::ImageFormat::Png)
+                    .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
+            }
+            Ok(output_path.to_string_lossy().to_string())
+        }
+    } else if format == "png" {
+        let file_size = FileSystemGuard::get_file_size(file_path)?;
+        let is_already_png = file_path.to_lowercase().ends_with(".png");
+        let output_path = temp_path.with_extension("png");
+
+        if is_already_png && file_size <= 10 * 1024 * 1024 {
+            log::info!(
+                "PNG: File size {} <= 10MB and already PNG, fast-copying",
+                file_size
+            );
+            tokio::fs::copy(file_path, &output_path)
+                .await
+                .map_err(|e| AppError::Io(e))?;
+        } else {
+            let img = load_image_efficiently(file_path)?;
+            img.save_with_format(&output_path, image::ImageFormat::Png)
+                .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
+            log::info!("Converted {} to PNG", file_path);
+        }
+        Ok(output_path.to_string_lossy().to_string())
+    } else if format == "lossless_webp" {
+        let output_path = temp_path.with_extension("webp");
+        let img = load_image_efficiently(file_path)?;
+        let rgba_img = img.to_rgba8();
+        let (width, height) = rgba_img.dimensions();
+
+        let encoder = webp::Encoder::from_rgba(&rgba_img, width, height);
+        let webp_data = encoder.encode_lossless(); // Lossless encoding
+
+        fs::write(&output_path, &*webp_data)?;
+        log::info!("Compressed {} to Lossless WebP", file_path);
+
+        Ok(output_path.to_string_lossy().to_string())
+    } else if format == "jpg" {
         let output_path = temp_path.with_extension("jpg");
+        let img = load_image_efficiently(file_path)?;
+
         let mut output = Vec::new();
         let mut cursor = Cursor::new(&mut output);
         img.write_to(&mut cursor, ImageOutputFormat::Jpeg(quality))?;
@@ -1003,8 +1131,9 @@ pub async fn compress_image_with_format(
 
         Ok(output_path.to_string_lossy().to_string())
     } else {
-        // Use webp crate for lossy WebP compression with quality control
+        // Default: WebP Lossy
         let output_path = temp_path.with_extension("webp");
+        let img = load_image_efficiently(file_path)?;
 
         // Convert to RGBA for webp encoder
         let rgba_img = img.to_rgba8();
@@ -1025,6 +1154,27 @@ pub async fn compress_image_with_format(
 
         Ok(output_path.to_string_lossy().to_string())
     }
+}
+
+pub async fn resize_image_box(file_path: &str, scale: f32) -> AppResult<String> {
+    InputValidator::validate_image_file(file_path)?;
+    let temp_path = FileSystemGuard::create_secure_temp_file(file_path)?;
+    let output_path = temp_path.with_extension("png");
+
+    let img = load_image_efficiently(file_path)?;
+    let width = (img.width() as f32 * scale) as u32;
+    let height = (img.height() as f32 * scale) as u32;
+
+    log::info!("Resizing {} to {}x{} (Lanczos3)", file_path, width, height);
+
+    // Using Lanczos3 for high quality downscaling (better than Box for photos)
+    let resized = img.resize(width, height, image::imageops::FilterType::Lanczos3);
+
+    resized
+        .save_with_format(&output_path, image::ImageFormat::Png)
+        .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
+
+    Ok(output_path.to_string_lossy().to_string())
 }
 
 fn load_image_efficiently(file_path: &str) -> AppResult<image::DynamicImage> {

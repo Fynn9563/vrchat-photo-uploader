@@ -8,6 +8,7 @@ use tauri::{
     SystemTrayMenuItem,
 };
 
+pub mod background_watcher;
 mod commands;
 mod config;
 mod database;
@@ -16,6 +17,7 @@ mod image_processor;
 mod metadata_editor;
 mod security;
 mod single_instance;
+
 mod uploader;
 
 use commands::*;
@@ -189,9 +191,11 @@ fn main() {
             _ => {}
         })
         .manage(ProgressState::new(Mutex::new(HashMap::new())))
+        .manage(Mutex::new(background_watcher::BackgroundWatcher::new()))
         .invoke_handler(tauri::generate_handler![
             get_webhooks,
             add_webhook,
+            update_webhook,
             delete_webhook,
             upload_images,
             get_upload_progress,
@@ -214,7 +218,10 @@ fn main() {
             cleanup_temp_files,
             shell_open,
             debug_extract_metadata,
-            check_for_updates
+            check_for_updates,
+            get_user_webhook_overrides,
+            add_user_webhook_override,
+            delete_user_webhook_override
         ])
         .setup(|app| {
             log::info!("Setting up application...");
@@ -309,6 +316,27 @@ fn main() {
             tauri::async_runtime::spawn(async {
                 if let Err(e) = security::FileSystemGuard::cleanup_temp_files() {
                     log::warn!("Failed to cleanup temp files: {}", e);
+                }
+            });
+
+            // Initialize Background Watcher
+            let watcher_app_handle = app.handle();
+            tauri::async_runtime::spawn(async move {
+                // Determine VRChat path (frontend or logic? For now rely on Config being populated)
+                if let Ok(config) = config::load_config() {
+                    if config.enable_auto_upload {
+                        if let Some(path) = config.vrchat_path {
+                            // Chain state access to avoid lifetime issues with local variable
+                            if let Ok(mut watcher) = watcher_app_handle
+                                .state::<Mutex<background_watcher::BackgroundWatcher>>()
+                                .lock()
+                            {
+                                if let Err(e) = watcher.start(watcher_app_handle.clone(), path) {
+                                    log::error!("Failed to start background watcher: {}", e);
+                                }
+                            }
+                        }
+                    }
                 }
             });
 

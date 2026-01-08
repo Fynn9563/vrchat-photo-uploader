@@ -21,7 +21,54 @@ pub struct Config {
     pub backup_original_files: bool,
     pub show_upload_notifications: bool,
     pub log_level: String,
-    pub compression_format: String, // "webp" or "jpg"
+    pub compression_format: String, // "webp", "lossless_webp", "png", "jpg"
+    pub enable_auto_upload: bool,
+    pub auto_upload_webhook_id: Option<i64>,
+    pub vrchat_path: Option<String>,
+    #[serde(default = "default_false_config")]
+    pub single_thread_mode: bool,
+    #[serde(default = "default_false_config")]
+    pub merge_no_metadata: bool,
+    #[serde(default = "default_delay_config")]
+    pub auto_upload_delay_seconds: u32,
+    #[serde(default = "default_batch_config")]
+    pub auto_upload_batch_size: u8,
+    #[serde(default = "default_true_config")]
+    pub auto_upload_forum_channel: bool,
+    #[serde(default = "default_false_config")]
+    pub auto_upload_single_thread: bool,
+    #[serde(default = "default_true_config")]
+    pub auto_upload_group_by_metadata: bool,
+    #[serde(default = "default_true_config")]
+    pub auto_upload_group_by_world: bool,
+    #[serde(default = "default_true_config")]
+    pub auto_upload_group_by_time: bool,
+    #[serde(default = "default_time_window_config")]
+    pub auto_upload_time_window: u32,
+    #[serde(default = "default_true_config")]
+    pub auto_upload_include_players: bool,
+    #[serde(default = "default_false_config")]
+    pub auto_upload_merge_no_metadata: bool,
+}
+
+fn default_delay_config() -> u32 {
+    5
+}
+
+fn default_batch_config() -> u8 {
+    10
+}
+
+fn default_false_config() -> bool {
+    false
+}
+
+fn default_true_config() -> bool {
+    true
+}
+
+fn default_time_window_config() -> u32 {
+    60
 }
 
 impl Default for Config {
@@ -42,6 +89,21 @@ impl Default for Config {
             show_upload_notifications: true,
             log_level: "info".to_string(),
             compression_format: "webp".to_string(), // WebP by default (better compression)
+            enable_auto_upload: false,
+            auto_upload_webhook_id: None,
+            vrchat_path: None,
+            single_thread_mode: false,
+            merge_no_metadata: false,
+            auto_upload_delay_seconds: 5,
+            auto_upload_batch_size: 10,
+            auto_upload_forum_channel: true,
+            auto_upload_single_thread: false,
+            auto_upload_group_by_metadata: true,
+            auto_upload_group_by_world: true,
+            auto_upload_group_by_time: true,
+            auto_upload_time_window: 60,
+            auto_upload_include_players: true,
+            auto_upload_merge_no_metadata: false,
         }
     }
 }
@@ -55,7 +117,23 @@ impl From<Config> for AppConfig {
             enable_global_shortcuts: config.enable_global_shortcuts,
             auto_compress_threshold: config.auto_compress_threshold,
             upload_quality: config.upload_quality,
+
             compression_format: config.compression_format,
+            enable_auto_upload: config.enable_auto_upload,
+            auto_upload_webhook_id: config.auto_upload_webhook_id,
+            vrchat_path: config.vrchat_path,
+            single_thread_mode: config.single_thread_mode,
+            merge_no_metadata: config.merge_no_metadata,
+            auto_upload_delay_seconds: config.auto_upload_delay_seconds,
+            auto_upload_batch_size: config.auto_upload_batch_size,
+            auto_upload_forum_channel: config.auto_upload_forum_channel,
+            auto_upload_single_thread: config.auto_upload_single_thread,
+            auto_upload_group_by_metadata: config.auto_upload_group_by_metadata,
+            auto_upload_group_by_world: config.auto_upload_group_by_world,
+            auto_upload_group_by_time: config.auto_upload_group_by_time,
+            auto_upload_time_window: config.auto_upload_time_window,
+            auto_upload_include_players: config.auto_upload_include_players,
+            auto_upload_merge_no_metadata: config.auto_upload_merge_no_metadata,
         }
     }
 }
@@ -70,6 +148,21 @@ impl From<AppConfig> for Config {
             auto_compress_threshold: app_config.auto_compress_threshold,
             upload_quality: app_config.upload_quality,
             compression_format: app_config.compression_format,
+            enable_auto_upload: app_config.enable_auto_upload,
+            auto_upload_webhook_id: app_config.auto_upload_webhook_id,
+            vrchat_path: app_config.vrchat_path,
+            single_thread_mode: app_config.single_thread_mode,
+            merge_no_metadata: app_config.merge_no_metadata,
+            auto_upload_delay_seconds: app_config.auto_upload_delay_seconds,
+            auto_upload_batch_size: app_config.auto_upload_batch_size,
+            auto_upload_forum_channel: app_config.auto_upload_forum_channel,
+            auto_upload_single_thread: app_config.auto_upload_single_thread,
+            auto_upload_group_by_metadata: app_config.auto_upload_group_by_metadata,
+            auto_upload_group_by_world: app_config.auto_upload_group_by_world,
+            auto_upload_group_by_time: app_config.auto_upload_group_by_time,
+            auto_upload_time_window: app_config.auto_upload_time_window,
+            auto_upload_include_players: app_config.auto_upload_include_players,
+            auto_upload_merge_no_metadata: app_config.auto_upload_merge_no_metadata,
             ..Default::default()
         }
     }
@@ -213,11 +306,11 @@ pub fn validate_config(config: &Config) -> AppResult<()> {
     }
 
     // Validate compression format
-    let valid_formats = ["webp", "jpg"];
+    let valid_formats = ["webp", "lossless_webp", "png", "jpg"];
     if !valid_formats.contains(&config.compression_format.as_str()) {
         return Err(AppError::validation(
             "compression_format",
-            "Must be 'webp' or 'jpg'",
+            "Must be 'webp', 'lossless_webp', 'png', or 'jpg'",
         ));
     }
 

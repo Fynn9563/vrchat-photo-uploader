@@ -186,7 +186,10 @@ impl DiscordClient {
 
             if status.is_success() {
                 let response_text = response.text().await?;
-                log::debug!("Forum text message sent successfully");
+                log::info!(
+                    "✅ Forum text message sent successfully. Response: {}",
+                    response_text
+                );
                 return Ok(response_text);
             }
 
@@ -194,6 +197,12 @@ impl DiscordClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
+
+            log::error!(
+                "❌ Failed to send forum text message. Status: {}, Error: {}",
+                status,
+                error_text
+            );
 
             attempt += 1;
             if should_retry_error(status.as_u16()) && attempt <= self.retry_config.max_retries {
@@ -444,7 +453,6 @@ fn should_retry_error(status_code: u16) -> bool {
 /// For forum channels, the thread_id is in the 'channel_id' field (not 'id' which is message ID)
 pub fn extract_thread_id(response_data: &str) -> Option<String> {
     log::info!("🔍 Attempting to extract thread_id from Discord response");
-    log::debug!("Response data length: {} bytes", response_data.len());
 
     if response_data.is_empty() {
         log::error!("❌ Empty response body - this suggests wait=true was not used!");
@@ -457,54 +465,41 @@ pub fn extract_thread_id(response_data: &str) -> Option<String> {
     );
 
     // Parse Discord response to extract thread/channel ID for forum posts
-    match serde_json::from_str::<serde_json::Value>(response_data) {
-        Ok(json) => {
-            log::debug!("✅ Successfully parsed Discord response as JSON");
-
-            // For forum posts, 'channel_id' is the thread ID we need for follow-up messages
-            // 'id' is just the message ID within that thread
-            if let Some(channel_id) = json.get("channel_id").and_then(|v| v.as_str()) {
-                log::info!(
-                    "🎉 Extracted thread_id from 'channel_id' field: {}",
-                    channel_id
-                );
-                return Some(channel_id.to_string());
-            }
-
-            // Fallback to 'id' for regular channels (non-forum)
-            if let Some(id_value) = json.get("id") {
-                if let Some(id_str) = id_value.as_str() {
-                    log::info!(
-                        "🎉 Extracted thread_id from 'id' field (fallback): {}",
-                        id_str
-                    );
-                    return Some(id_str.to_string());
-                }
-            }
-
-            // Log the full structure for debugging
-            log::debug!(
-                "Discord response structure: {}",
-                serde_json::to_string_pretty(&json).unwrap_or_else(|_| "Invalid JSON".to_string())
-            );
-
-            // Check if there are any other ID-like fields
-            if let Some(obj) = json.as_object() {
-                for (key, value) in obj {
-                    if key.contains("id") && value.is_string() {
-                        log::debug!("Found ID field '{}': {}", key, value);
-                    }
-                }
-            }
-
-            log::error!("❌ No thread_id found in any expected fields (id, channel_id)");
-        }
+    let json: serde_json::Value = match serde_json::from_str(response_data) {
+        Ok(v) => v,
         Err(e) => {
             log::error!("❌ Failed to parse Discord response as JSON: {}", e);
-            log::debug!("Raw response that failed to parse: {}", response_data);
+            return None;
+        }
+    };
+
+    log::debug!("✅ Successfully parsed Discord response as JSON: {}", json);
+
+    // 1. Check object type (10, 11, 12 are threads)
+    if let Some(t) = json.get("type").and_then(|v| v.as_u64()) {
+        if t == 10 || t == 11 || t == 12 {
+            if let Some(id) = json.get("id").and_then(|v| v.as_str()) {
+                log::info!("🎉 Extracted thread_id from Thread Object 'id': {}", id);
+                return Some(id.to_string());
+            }
         }
     }
 
-    log::error!("❌ Could not extract thread_id from Discord response");
+    // 2. Try 'channel_id' (common for forum message responses)
+    if let Some(channel_id) = json.get("channel_id").and_then(|v| v.as_str()) {
+        log::info!(
+            "🎉 Extracted thread_id from 'channel_id' field: {}",
+            channel_id
+        );
+        return Some(channel_id.to_string());
+    }
+
+    // 3. Fallback to 'id' (might be thread ID or message ID)
+    if let Some(id) = json.get("id").and_then(|v| v.as_str()) {
+        log::info!("🎉 Extracted thread_id from 'id' field (fallback): {}", id);
+        return Some(id.to_string());
+    }
+
+    log::error!("❌ Could not extract thread_id from any expected fields (channel_id, id)");
     None
 }
