@@ -439,7 +439,7 @@ jobs:
       - name: Test Tauri build
         run: |
           cd src-tauri
-          cargo build --release
+          cargo build --release --features nasm
 
       - name: Upload PR build artifacts
         if: github.event_name == 'pull_request'
