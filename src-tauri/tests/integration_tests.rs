@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::Write;
-use vrchat_photo_uploader::{
+use VRChat_Photo_Uploader::{
     errors::AppError,
     image_processor,
     security::{FileSystemGuard, InputValidator},
