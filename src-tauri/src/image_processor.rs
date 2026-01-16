@@ -1,9 +1,9 @@
 use chrono::Offset;
 use flate2::read::DeflateDecoder;
-use image::ImageOutputFormat;
+use image::codecs::jpeg::JpegEncoder;
 use serde_json;
 use std::fs;
-use std::io::{BufReader, Cursor, Read, Seek, SeekFrom};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::commands::{AuthorInfo, ImageMetadata, PlayerInfo, WorldInfo};
@@ -564,13 +564,6 @@ fn extract_vrchat_xmp_metadata(file_path: &str) -> AppResult<Option<ImageMetadat
         }
     }
 
-    // Also try to read raw XMP data from the file
-    // Some tools embed XMP directly without proper chunk structure
-    // OPTIMIZATION: Disabled for batch processing as it reads the entire file
-    // if let Some(metadata) = try_extract_raw_xmp(file_path)? {
-    //     return Ok(Some(metadata));
-    // }
-
     Ok(None)
 }
 
@@ -646,57 +639,6 @@ fn extract_compressed_text_content(data: &[u8]) -> Option<String> {
         }
     }
     None
-}
-
-/// Try to extract raw XMP data from the file by searching for XMP markers
-fn try_extract_raw_xmp(file_path: &str) -> AppResult<Option<ImageMetadata>> {
-    let file_content = fs::read(file_path)?;
-
-    // Look for XMP packet start marker
-    let xmp_start_marker = b"<?xpacket begin";
-    let xmp_end_marker = b"<?xpacket end";
-
-    // Also look for RDF marker which is common in XMP
-    let rdf_start = b"<x:xmpmeta";
-    let rdf_end = b"</x:xmpmeta>";
-
-    // Try to find XMP packet
-    if let Some(start_pos) = find_subsequence(&file_content, xmp_start_marker) {
-        if let Some(end_offset) = find_subsequence(&file_content[start_pos..], xmp_end_marker) {
-            let end_pos = start_pos + end_offset + 20; // Include the end marker and some buffer
-            let end_pos = std::cmp::min(end_pos, file_content.len());
-
-            if let Ok(xmp_text) = std::str::from_utf8(&file_content[start_pos..end_pos]) {
-                log::debug!("Found raw XMP packet in file");
-                if let Some(metadata) = parse_vrchat_xmp(xmp_text) {
-                    return Ok(Some(metadata));
-                }
-            }
-        }
-    }
-
-    // Try RDF format
-    if let Some(start_pos) = find_subsequence(&file_content, rdf_start) {
-        if let Some(end_offset) = find_subsequence(&file_content[start_pos..], rdf_end) {
-            let end_pos = start_pos + end_offset + rdf_end.len();
-
-            if let Ok(xmp_text) = std::str::from_utf8(&file_content[start_pos..end_pos]) {
-                log::debug!("Found raw RDF/XMP data in file");
-                if let Some(metadata) = parse_vrchat_xmp(xmp_text) {
-                    return Ok(Some(metadata));
-                }
-            }
-        }
-    }
-
-    Ok(None)
-}
-
-/// Find a subsequence in a byte slice
-fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
 }
 
 /// Parse VRChat XMP metadata from XMP content string
@@ -1074,9 +1016,16 @@ async fn compress_image_with_format_internal(
                     "Smart PNG: File size {} <= 10MB but not PNG, converting",
                     file_size
                 );
-                let img = load_image_efficiently(file_path)?;
-                img.save_with_format(&output_path, image::ImageFormat::Png)
-                    .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
+                let file_path_owned = file_path.to_string();
+                let output_path_clone = output_path.clone();
+                tokio::task::spawn_blocking(move || {
+                    let img = load_image_efficiently(&file_path_owned)?;
+                    img.save_with_format(&output_path_clone, image::ImageFormat::Png)
+                        .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
+                    Ok::<_, AppError>(())
+                })
+                .await
+                .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
             }
             Ok(output_path.to_string_lossy().to_string())
         }
@@ -1094,36 +1043,87 @@ async fn compress_image_with_format_internal(
                 .await
                 .map_err(|e| AppError::Io(e))?;
         } else {
-            let img = load_image_efficiently(file_path)?;
-            img.save_with_format(&output_path, image::ImageFormat::Png)
-                .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
-            log::info!("Converted {} to PNG", file_path);
+            let file_path_owned = file_path.to_string();
+            let output_path_clone = output_path.clone();
+            tokio::task::spawn_blocking(move || {
+                let img = load_image_efficiently(&file_path_owned)?;
+                img.save_with_format(&output_path_clone, image::ImageFormat::Png)
+                    .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
+                log::info!("Converted {} to PNG", file_path_owned);
+                Ok::<_, AppError>(())
+            })
+            .await
+            .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
         }
         Ok(output_path.to_string_lossy().to_string())
     } else if format == "lossless_webp" {
         let output_path = temp_path.with_extension("webp");
-        let img = load_image_efficiently(file_path)?;
-        let rgba_img = img.to_rgba8();
-        let (width, height) = rgba_img.dimensions();
+        let file_path_owned = file_path.to_string();
+        let output_path_clone = output_path.clone();
 
-        let encoder = webp::Encoder::from_rgba(&rgba_img, width, height);
-        let webp_data = encoder.encode_lossless(); // Lossless encoding
+        tokio::task::spawn_blocking(move || {
+            let img = load_image_efficiently(&file_path_owned)?;
+            let rgba_img = img.to_rgba8();
+            let (width, height) = rgba_img.dimensions();
 
-        fs::write(&output_path, &*webp_data)?;
-        log::info!("Compressed {} to Lossless WebP", file_path);
+            let encoder = webp::Encoder::from_rgba(&rgba_img, width, height);
+            let webp_data = encoder.encode_lossless();
+
+            fs::write(&output_path_clone, &*webp_data)?;
+            log::info!("Compressed {} to Lossless WebP", file_path_owned);
+            Ok::<_, AppError>(())
+        })
+        .await
+        .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
 
         Ok(output_path.to_string_lossy().to_string())
     } else if format == "jpg" {
         let output_path = temp_path.with_extension("jpg");
-        let img = load_image_efficiently(file_path)?;
+        let file_path_owned = file_path.to_string();
+        let output_path_clone = output_path.clone();
 
-        let mut output = Vec::new();
-        let mut cursor = Cursor::new(&mut output);
-        img.write_to(&mut cursor, ImageOutputFormat::Jpeg(quality))?;
-        fs::write(&output_path, output)?;
+        tokio::task::spawn_blocking(move || {
+            let img = load_image_efficiently(&file_path_owned)?;
+            let mut output = Vec::new();
+            {
+                let mut encoder = JpegEncoder::new_with_quality(&mut output, quality);
+                encoder.encode_image(&img)
+                    .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
+            }
+            fs::write(&output_path_clone, output)?;
+            log::info!(
+                "Compressed {} to JPEG at {} (quality: {})",
+                file_path_owned,
+                output_path_clone.display(),
+                quality
+            );
+            Ok::<_, AppError>(())
+        })
+        .await
+        .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
+
+        Ok(output_path.to_string_lossy().to_string())
+    } else if format == "avif" {
+        let output_path = temp_path.with_extension("avif");
+        let file_path_owned = file_path.to_string();
+
+        // Load and convert image in blocking thread, then encode AVIF
+        let (rgba_img, width, height) = tokio::task::spawn_blocking(move || {
+            let img = load_image_efficiently(&file_path_owned)?;
+            let rgba_img = img.to_rgba8();
+            let (width, height) = rgba_img.dimensions();
+            Ok::<_, AppError>((rgba_img, width, height))
+        })
+        .await
+        .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
+
+        // Encode to AVIF using ravif (runs in blocking thread pool with multi-threading)
+        let avif_data = encode_avif(rgba_img, width, height, quality).await?;
+
+        fs::write(&output_path, avif_data)?;
 
         log::info!(
-            "Compressed {} to JPEG at {} (quality: {})",
+            "Compressed {} to AVIF at {} (quality: {})",
             file_path,
             output_path.display(),
             quality
@@ -1133,24 +1133,28 @@ async fn compress_image_with_format_internal(
     } else {
         // Default: WebP Lossy
         let output_path = temp_path.with_extension("webp");
-        let img = load_image_efficiently(file_path)?;
+        let file_path_owned = file_path.to_string();
+        let output_path_clone = output_path.clone();
 
-        // Convert to RGBA for webp encoder
-        let rgba_img = img.to_rgba8();
-        let (width, height) = rgba_img.dimensions();
+        tokio::task::spawn_blocking(move || {
+            let img = load_image_efficiently(&file_path_owned)?;
+            let rgba_img = img.to_rgba8();
+            let (width, height) = rgba_img.dimensions();
 
-        // Create WebP encoder with lossy compression
-        let encoder = webp::Encoder::from_rgba(&rgba_img, width, height);
-        let webp_data = encoder.encode(quality as f32);
+            let encoder = webp::Encoder::from_rgba(&rgba_img, width, height);
+            let webp_data = encoder.encode(quality as f32);
 
-        fs::write(&output_path, &*webp_data)?;
-
-        log::info!(
-            "Compressed {} to WebP at {} (quality: {})",
-            file_path,
-            output_path.display(),
-            quality
-        );
+            fs::write(&output_path_clone, &*webp_data)?;
+            log::info!(
+                "Compressed {} to WebP at {} (quality: {})",
+                file_path_owned,
+                output_path_clone.display(),
+                quality
+            );
+            Ok::<_, AppError>(())
+        })
+        .await
+        .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
 
         Ok(output_path.to_string_lossy().to_string())
     }
@@ -1160,19 +1164,27 @@ pub async fn resize_image_box(file_path: &str, scale: f32) -> AppResult<String> 
     InputValidator::validate_image_file(file_path)?;
     let temp_path = FileSystemGuard::create_secure_temp_file(file_path)?;
     let output_path = temp_path.with_extension("png");
+    let file_path_owned = file_path.to_string();
+    let output_path_clone = output_path.clone();
 
-    let img = load_image_efficiently(file_path)?;
-    let width = (img.width() as f32 * scale) as u32;
-    let height = (img.height() as f32 * scale) as u32;
+    tokio::task::spawn_blocking(move || {
+        let img = load_image_efficiently(&file_path_owned)?;
+        let width = (img.width() as f32 * scale) as u32;
+        let height = (img.height() as f32 * scale) as u32;
 
-    log::info!("Resizing {} to {}x{} (Lanczos3)", file_path, width, height);
+        log::info!("Resizing {} to {}x{} (Lanczos3)", file_path_owned, width, height);
 
-    // Using Lanczos3 for high quality downscaling (better than Box for photos)
-    let resized = img.resize(width, height, image::imageops::FilterType::Lanczos3);
+        // Using Lanczos3 for high quality downscaling (better than Box for photos)
+        let resized = img.resize(width, height, image::imageops::FilterType::Lanczos3);
 
-    resized
-        .save_with_format(&output_path, image::ImageFormat::Png)
-        .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
+        resized
+            .save_with_format(&output_path_clone, image::ImageFormat::Png)
+            .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
+
+        Ok::<_, AppError>(())
+    })
+    .await
+    .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
 
     Ok(output_path.to_string_lossy().to_string())
 }
@@ -1210,6 +1222,48 @@ fn load_image_efficiently(file_path: &str) -> AppResult<image::DynamicImage> {
         // Normal loading for smaller files
         Ok(image::open(file_path)?)
     }
+}
+
+/// Encode an RGBA image to AVIF format using ravif
+/// This is CPU-intensive, so we run it in a blocking thread pool
+async fn encode_avif(
+    rgba_img: image::RgbaImage,
+    width: u32,
+    height: u32,
+    quality: u8,
+) -> AppResult<Vec<u8>> {
+    // Move CPU-intensive AVIF encoding to a blocking thread
+    // This prevents blocking the async runtime and keeps the UI responsive
+    tokio::task::spawn_blocking(move || {
+        use ravif::{Encoder, Img};
+        use rgb::RGBA8;
+
+        // Convert image data to rgb crate's RGBA8 format
+        let pixels: Vec<RGBA8> = rgba_img
+            .pixels()
+            .map(|p| RGBA8::new(p[0], p[1], p[2], p[3]))
+            .collect();
+
+        // Create an Img from the pixel data
+        let img = Img::new(&pixels[..], width as usize, height as usize);
+
+        // Configure the encoder
+        // Quality in ravif is 0-100 where 100 is best quality
+        // Speed is 1-10 where 1 is slowest/best and 10 is fastest
+        // Use speed 8 for faster encoding (good balance for batch uploads)
+        let encoder = Encoder::new()
+            .with_quality(quality as f32)
+            .with_speed(8);
+
+        // Encode the image
+        let result = encoder
+            .encode_rgba(img)
+            .map_err(|e| AppError::ImageProcessing(format!("AVIF encoding failed: {}", e)))?;
+
+        Ok(result.avif_file)
+    })
+    .await
+    .map_err(|e| AppError::ImageProcessing(format!("AVIF encoding task failed: {}", e)))?
 }
 
 pub async fn get_file_hash(file_path: &str) -> AppResult<String> {
@@ -1335,7 +1389,7 @@ pub fn get_image_info(file_path: &str) -> AppResult<(u32, u32, u64)> {
     let file_size = FileSystemGuard::get_file_size(file_path)?;
 
     // Read only the image header for dimensions
-    let reader = image::io::Reader::open(file_path)?.with_guessed_format()?;
+    let reader = image::ImageReader::open(file_path)?.with_guessed_format()?;
 
     let dimensions = reader.into_dimensions()?;
 

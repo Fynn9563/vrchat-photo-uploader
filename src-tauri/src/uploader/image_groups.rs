@@ -287,6 +287,7 @@ pub fn create_discord_payload(
     is_forum_post: bool,
     _thread_id: Option<&str>,
     include_player_names: bool,
+    image_count: usize,
 ) -> (HashMap<String, String>, Vec<String>) {
     let mut payload = HashMap::new();
     let mut overflow_messages = Vec::new();
@@ -298,11 +299,12 @@ pub fn create_discord_payload(
             all_players,
             timestamp,
             include_player_names,
+            image_count,
         );
         payload.insert("content".to_string(), content);
 
         if is_forum_post {
-            let thread_name = create_thread_title(all_worlds);
+            let thread_name = create_thread_title(all_worlds, image_count);
             payload.insert("thread_name".to_string(), thread_name);
         }
 
@@ -324,14 +326,18 @@ fn create_message_content_with_players(
     all_players: &[PlayerInfo],
     timestamp: Option<i64>,
     include_player_names: bool,
+    image_count: usize,
 ) -> (String, Vec<PlayerInfo>, bool) {
     const MAX_LENGTH: usize = 1900;
     let mut content = String::new();
     let mut remaining_players: Vec<PlayerInfo> = Vec::new();
     let mut had_players_in_main = false;
 
+    // Use singular "Photo" for 1 image, plural "Photos" for multiple
+    let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
+
     if !all_worlds.is_empty() {
-        content.push_str("📸 Photos taken at ");
+        content.push_str(&format!("📸 {} taken at ", photo_word));
 
         let world_parts: Vec<String> = all_worlds
             .iter()
@@ -392,7 +398,7 @@ fn create_message_content_with_players(
             }
         }
     } else {
-        content.push_str("📸 Photos");
+        content.push_str(&format!("📸 {}", photo_word));
         if let Some(ts) = timestamp {
             content.push_str(&format!(" taken at <t:{}:f>", ts));
         }
@@ -447,31 +453,33 @@ fn create_overflow_player_messages(
     messages
 }
 
-fn create_thread_title(all_worlds: &[WorldInfo]) -> String {
+fn create_thread_title(all_worlds: &[WorldInfo], image_count: usize) -> String {
+    let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
     if !all_worlds.is_empty() {
         let world_names: Vec<&str> = all_worlds.iter().map(|w| w.name.as_str()).collect();
-        let title = format!("📸 Photos from {}", world_names.join(", "));
+        let title = format!("📸 {} from {}", photo_word, world_names.join(", "));
         if title.len() > 100 {
             format!("{}...", &title[..97])
         } else {
             title
         }
     } else {
-        "📸 Photos".to_string()
+        format!("📸 {}", photo_word)
     }
 }
 
 /// Creates a message with just worlds (no players) - used for first retry when combined message is too long
-pub fn create_worlds_only_message(all_worlds: &[WorldInfo], timestamp: Option<i64>) -> String {
+pub fn create_worlds_only_message(all_worlds: &[WorldInfo], timestamp: Option<i64>, image_count: usize) -> String {
+    let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
     if all_worlds.is_empty() {
-        let mut content = String::from("📸 Photos");
+        let mut content = format!("📸 {}", photo_word);
         if let Some(ts) = timestamp {
             content.push_str(&format!(" taken at <t:{}:f>", ts));
         }
         return content;
     }
 
-    let mut content = String::from("📸 Photos taken at ");
+    let mut content = format!("📸 {} taken at ", photo_word);
 
     let world_parts: Vec<String> = all_worlds
         .iter()
@@ -496,15 +504,16 @@ pub fn create_worlds_only_message(all_worlds: &[WorldInfo], timestamp: Option<i6
 
 /// Creates a compact world summary (names only) and separate links messages
 /// Returns (summary_message, link_messages) - used when there are many worlds
-pub fn create_compact_world_messages(all_worlds: &[WorldInfo]) -> (String, Vec<String>) {
+pub fn create_compact_world_messages(all_worlds: &[WorldInfo], image_count: usize) -> (String, Vec<String>) {
     const MAX_LENGTH: usize = 1900;
+    let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
 
     if all_worlds.is_empty() {
-        return ("📸 Photos".to_string(), vec![]);
+        return (format!("📸 {}", photo_word), vec![]);
     }
 
     // Build summary message with world names (bullet list)
-    let mut summary = format!("📸 Photos from {} worlds:\n", all_worlds.len());
+    let mut summary = format!("📸 {} from {} worlds:\n", photo_word, all_worlds.len());
     for world in all_worlds.iter() {
         summary.push_str(&format!("• {}\n", world.name));
     }

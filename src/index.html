@@ -43,7 +43,7 @@
         <div class="settings-row">
           <div class="setting-item setting-item-toggle">
             <div class="setting-toggle">
-              <input type="checkbox" id="isForumChannel" class="toggle-input" checked />
+              <input type="checkbox" id="isForumChannel" class="toggle-input" />
               <label for="isForumChannel" class="toggle-label">
                 <span class="toggle-switch"></span>
               </label>
@@ -352,11 +352,17 @@
               <label for="enableImagePreview" class="form-label">Enable Ctrl+Hover image previews</label>
             </div>
 
+            <div class="checkbox-group">
+              <input type="checkbox" id="defaultForumMode" class="checkbox" />
+              <label for="defaultForumMode" class="form-label">Default Forum Channel mode to ON</label>
+            </div>
+
             <div class="form-group" style="margin-top: 16px;">
               <label for="compressionFormat" class="form-label">Compression Format</label>
               <select id="compressionFormat" class="form-control">
                 <option value="webp">WebP (smaller files, recommended)</option>
                 <option value="lossless_webp">WebP (Lossless)</option>
+                <option value="avif">AVIF (best compression, slower)</option>
                 <option value="png">PNG (Smart Resizing >10MB)</option>
                 <option value="jpg">JPEG (better compatibility)</option>
               </select>
@@ -389,7 +395,7 @@
           <div class="form-help">Automatically uploads new photos detected in the VRChat folder. requires VRChat Folder
             to be set.</div>
 
-          <div id="autoUploadSettings" class="form-group sub-settings" style="margin-left: 20px; margin-top: 10px;">
+          <div id="autoUploadSettings" class="form-group sub-settings hidden" style="margin-left: 20px; margin-top: 10px;">
             <label class="form-label">Target Webhook</label>
             <select id="autoUploadWebhook" class="form-control" style="margin-bottom: 10px;">
               <option value="">Select Webhook...</option>
@@ -446,6 +452,20 @@
                 <label for="autoUploadMergeNoMetadata" class="form-label">Merge No-Metadata Photos</label>
               </div>
             </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <label class="form-label">📁 Ignored Folders</label>
+              <div class="form-help" style="margin-bottom: 8px;">
+                Folders to skip during auto-upload (e.g., Emoji, Stickers, Prints)
+              </div>
+              <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                <input type="text" id="ignoredFolderInput" class="form-control" placeholder="Folder name to ignore..." style="flex: 1;" />
+                <button type="button" id="addIgnoredFolderBtn" class="btn btn-secondary">➕ Add</button>
+              </div>
+              <div id="ignoredFoldersList" class="ignored-folders-list" style="max-height: 120px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px;">
+                <div class="ignored-folder-empty" style="color: var(--text-muted); font-size: 0.875rem;">No folders ignored</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -483,15 +503,16 @@
           <div class="features">
             <h3>Features:</h3>
             <ul>
-              <li>🏷️ Automatic metadata extraction from VRChat photos</li>
-              <li>📋 Smart grouping by world and players</li>
-              <li>🗜️ Automatic compression only when Discord requires it</li>
-              <li>🔄 Retry failed uploads with exponential backoff</li>
-              <li>📊 Upload statistics and progress tracking</li>
+              <li>🏷️ Automatic metadata extraction (VRCX & VRChat native)</li>
+              <li>📋 Smart grouping by world, time, and players</li>
+              <li>🗜️ Tiered compression fallback system</li>
+              <li>🔄 Background auto-upload with folder watching</li>
+              <li>📊 Real-time upload progress with ETA</li>
               <li>🎨 Dark/Light theme support</li>
               <li>⚡ Global keyboard shortcuts</li>
-              <li>💬 Discord Forum channel support</li>
-              <li>👁️ Ctrl+Hover image previews in upload queue</li>
+              <li>💬 Discord Forum channel & single thread mode</li>
+              <li>👁️ Ctrl+Hover image previews</li>
+              <li>🔀 User webhook overrides per player</li>
             </ul>
           </div>
 
@@ -513,6 +534,10 @@
             <p>Created by <strong>Fynn9563</strong></p>
             <p>Made with ❤️ for the VRChat community</p>
           </div>
+
+          <p class="disclaimer" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 15px; text-align: center;">
+            This application is not affiliated with, endorsed by, or sponsored by VRChat Inc. or Discord Inc.
+          </p>
 
           <div class="update-section">
             <button id="checkUpdatesBtn" class="btn btn-primary" style="margin-top: 15px;">
@@ -623,6 +648,7 @@
     <div class="background-panel-header">
       <span class="panel-icon">🔄</span>
       <span class="panel-title">Background Auto-Upload</span>
+      <button id="stopBackgroundUpload" class="stop-background-btn" aria-label="Stop">⏹️</button>
       <button id="closeBackgroundPanel" class="close-panel-btn" aria-label="Close">&times;</button>
     </div>
     <div class="background-panel-content">

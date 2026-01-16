@@ -85,9 +85,20 @@ impl BackgroundWatcher {
 
                             // Trigger / Reset Batch Logic
                             tauri::async_runtime::spawn(async move {
+                                // Load ignored folders from config
+                                let ignored_folders = config::load_config()
+                                    .map(|c| c.auto_upload_ignored_folders)
+                                    .unwrap_or_default();
+
                                 for path_buf in event.paths {
                                     let path_str = path_buf.to_string_lossy().to_string();
                                     if is_image_file(&path_str) {
+                                        // Check if file is in an ignored folder
+                                        if is_in_ignored_folder(&path_str, &ignored_folders) {
+                                            log::debug!("Ignoring file in ignored folder: {}", path_str);
+                                            continue;
+                                        }
+
                                         // Filter by time: Only process files created/modified after app start
                                         if let Ok(meta) = std::fs::metadata(&path_buf) {
                                             let file_time = meta
@@ -197,11 +208,17 @@ fn start_batch_monitor(
                         // We can't easily re-add to the watcher here without access to it,
                         // but we can manually scan for files that might have been missed
                         if let Ok(entries) = std::fs::read_dir(&month_path) {
+                            let ignored_folders = &config.auto_upload_ignored_folders;
                             for entry in entries.flatten() {
                                 let path = entry.path();
                                 if path.is_file() {
                                     let path_str = path.to_string_lossy().to_string();
                                     if is_image_file(&path_str) {
+                                        // Check if file is in an ignored folder
+                                        if is_in_ignored_folder(&path_str, ignored_folders) {
+                                            continue;
+                                        }
+
                                         // Check if already in database to avoid duplicates
                                         let is_processed = database::is_file_processed(&path_str)
                                             .await
@@ -296,7 +313,19 @@ fn start_batch_monitor(
                                 // Check if auto-upload was disabled mid-upload
                                 let config = config::load_config().ok();
                                 if config.map(|c| !c.enable_auto_upload).unwrap_or(false) {
-                                    log::warn!("Auto-upload disabled during active session.");
+                                    log::warn!("Auto-upload disabled during active session - cancelling upload.");
+                                    // Cancel the session
+                                    {
+                                        let state = app_handle.state::<ProgressState>();
+                                        if let Ok(mut progress) = state.inner().lock() {
+                                            if let Some(session_progress) = progress.get_mut(&session_id) {
+                                                session_progress.session_status = "cancelled".to_string();
+                                                log::info!("Background session {} cancelled due to auto-upload being disabled", session_id);
+                                            }
+                                        }
+                                    }
+                                    // Emit cancellation event
+                                    app_handle.emit_all("upload-cancelled", &session_id).ok();
                                     break;
                                 }
                             }
@@ -337,6 +366,33 @@ fn is_image_file(path: &str) -> bool {
         || lower.ends_with(".jpg")
         || lower.ends_with(".jpeg")
         || lower.ends_with(".webp")
+        || lower.ends_with(".avif")
+}
+
+/// Check if a file path is inside any of the ignored folders
+fn is_in_ignored_folder(file_path: &str, ignored_folders: &[String]) -> bool {
+    if ignored_folders.is_empty() {
+        return false;
+    }
+
+    let path = Path::new(file_path);
+
+    // Check each component of the path against ignored folder names
+    for component in path.components() {
+        if let std::path::Component::Normal(os_str) = component {
+            if let Some(folder_name) = os_str.to_str() {
+                // Case-insensitive comparison
+                let folder_lower = folder_name.to_lowercase();
+                for ignored in ignored_folders {
+                    if folder_lower == ignored.to_lowercase() {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
 }
 
 async fn process_auto_upload_batch(
@@ -425,6 +481,15 @@ async fn process_auto_upload_batch(
         single_thread_mode: config.auto_upload_single_thread,
         merge_no_metadata: config.auto_upload_merge_no_metadata,
     };
+
+    // Re-check config right before starting (handles race with settings being saved)
+    let config_recheck = config::load_config().map_err(|e| AppError::Config(e.to_string()))?;
+    if !config_recheck.enable_auto_upload {
+        log::info!("Auto-upload was disabled before session could start - aborting.");
+        return Err(AppError::UploadFailed {
+            reason: "Auto-upload disabled before session start".to_string(),
+        });
+    }
 
     log::info!(
         "🚀 Auto-upload session starting for '{}' (Forum: {})",

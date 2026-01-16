@@ -150,7 +150,7 @@ fn save_png_with_metadata(
     // Convert image to PNG bytes
     let mut png_data = Vec::new();
     let mut cursor = Cursor::new(&mut png_data);
-    img.write_to(&mut cursor, image::ImageOutputFormat::Png)?;
+    img.write_to(&mut cursor, image::ImageFormat::Png)?;
 
     // Parse PNG and inject metadata
     let modified_png = inject_png_metadata(&png_data, metadata_json)?;

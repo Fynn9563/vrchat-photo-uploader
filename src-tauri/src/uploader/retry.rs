@@ -80,6 +80,7 @@ pub async fn retry_single_upload(
         webhook.is_forum,
         None,
         true,
+        1, // Single image retry
     );
 
     let dummy_progress_state = Arc::new(Mutex::new(HashMap::new()));

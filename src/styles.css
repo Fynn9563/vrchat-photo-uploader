@@ -1709,6 +1709,29 @@ kbd {
     flex: 1;
 }
 
+.stop-background-btn {
+    background: rgba(239, 68, 68, 0.3);
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.9rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px 8px;
+    transition: var(--transition);
+    margin-right: 8px;
+}
+
+.stop-background-btn:hover {
+    background: rgba(239, 68, 68, 0.5);
+    color: white;
+}
+
+.stop-background-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .close-panel-btn {
     background: none;
     border: none;

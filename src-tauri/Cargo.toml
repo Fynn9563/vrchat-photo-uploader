@@ -1,6 +1,6 @@
 [package]
 name = "VRChat-Photo-Uploader"
-version = "3.0.6"
+version = "3.1.0"
 description = "A powerful tool for uploading VRChat photos to Discord"
 authors = ["Fynn9563"]
 repository = "https://github.com/fynn9563/vrchat-photo-uploader"
@@ -68,14 +68,21 @@ uuid = { version = "1.7.0", features = ["v4", "serde"] }
 dirs = "5.0.1"
 regex = "1.10.2"
 anyhow = "1.0"
-image = { version = "0.24.8", features = ["png", "jpeg", "webp", "gif"] }
+image = { version = "0.25", features = ["png", "jpeg", "webp", "gif"] }
 webp = "0.3"
+# AVIF encoding - pure Rust by default (no NASM required)
+# Enable "nasm" feature for faster encoding when NASM is available
+# "threading" feature enables multi-threaded encoding via rayon
+ravif = { version = "0.11", default-features = false, features = ["threading"] }
+rgb = "0.8"
 flate2 = "1.0.28"
 notify = "6.1"
 
 [features]
 default = []
 custom-protocol = ["tauri/custom-protocol"]
+# Enable NASM-optimized AVIF encoding (faster, requires NASM installed at build time)
+nasm = ["ravif/asm"]
 
 [profile.release]
 panic = "abort"

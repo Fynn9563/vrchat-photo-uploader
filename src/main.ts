@@ -61,6 +61,7 @@ interface AppConfig {
   vrchat_path?: string;
   single_thread_mode: boolean;
   merge_no_metadata: boolean;
+  default_forum_mode: boolean;
   auto_upload_delay_seconds: number;
   auto_upload_batch_size: number;
   auto_upload_forum_channel: boolean;
@@ -71,6 +72,7 @@ interface AppConfig {
   auto_upload_time_window: number;
   auto_upload_include_players: boolean;
   auto_upload_merge_no_metadata: boolean;
+  auto_upload_ignored_folders: string[];
 }
 
 interface UserWebhookOverride {
@@ -97,6 +99,8 @@ class AppState {
     return this.uploadQueue;
   }
   private currentUploadSession: string | null = null;
+  private lastManualSessionId: string | null = null; // Tracks last manual session even after completion
+  private backgroundSessionId: string | null = null;
   public selectedWebhookId: number | null = null;
   private progressPollingInterval: number | null = null;
   private isUploading: boolean = false;
@@ -165,7 +169,49 @@ class AppState {
     return this.currentUploadSession;
   }
 
+  // Check if a session ID was/is a manual session (not background)
+  isManualSession(sessionId: string): boolean {
+    return sessionId === this.currentUploadSession || sessionId === this.lastManualSessionId;
+  }
+
+  getBackgroundSessionId(): string | null {
+    return this.backgroundSessionId;
+  }
+
+  setBackgroundSessionId(sessionId: string | null) {
+    this.backgroundSessionId = sessionId;
+  }
+
+  async stopBackgroundUpload() {
+    console.log('Stopping background upload session:', this.backgroundSessionId);
+
+    if (this.backgroundSessionId) {
+      try {
+        await invoke('cancel_upload_session', {
+          sessionId: this.backgroundSessionId
+        });
+        console.log('Background upload session cancelled successfully');
+        this.showInfo('Background upload stopped');
+      } catch (error) {
+        console.error('Failed to cancel background upload session:', error);
+        this.showError(`Failed to stop background upload: ${error}`);
+      }
+      this.backgroundSessionId = null;
+    } else {
+      console.warn('No active background session to cancel');
+      this.showWarning('No active background upload to stop');
+    }
+
+    // Hide the panel
+    const panel = document.getElementById('backgroundUploadPanel');
+    if (panel) panel.classList.add('hidden');
+  }
+
   updateBackgroundPanelFromItem(data: any) {
+    // Track the background session ID
+    if (data.session_id && data.session_id !== this.currentUploadSession) {
+      this.backgroundSessionId = data.session_id;
+    }
     const panel = document.getElementById('backgroundUploadPanel');
     const text = document.getElementById('backgroundProgressText');
     const count = document.getElementById('backgroundProgressCount');
@@ -946,11 +992,15 @@ class AppState {
 
       // Store session ID
       this.currentUploadSession = sessionId as string;
+      this.lastManualSessionId = sessionId as string; // Track for late-arriving events
       console.log('Current upload session set to:', sessionId);
       this.showSuccess('Upload started!');
 
       selectedItems.forEach(item => {
         item.status = 'uploading';
+        item.statusText = 'uploading';
+        item.error = null;  // Clear any previous error messages
+        item.progress = 0;
       });
       this.updateQueueDisplay();
 
@@ -1777,6 +1827,22 @@ class ModalManager {
 let selectedPngPath: string | null = null;
 let originalCreationTime: number | null = null;
 
+// Helper function to show/hide the Background Queue button based on auto-upload setting
+function updateBackgroundQueueButtonVisibility(enabled: boolean) {
+  const btn = document.getElementById('viewBackgroundQueueBtn');
+  if (btn) {
+    btn.style.display = enabled ? '' : 'none';
+  }
+}
+
+// Helper function to show/hide auto-upload settings based on checkbox
+function updateAutoUploadSettingsVisibility(enabled: boolean) {
+  const settingsDiv = document.getElementById('autoUploadSettings');
+  if (settingsDiv) {
+    settingsDiv.classList.toggle('hidden', !enabled);
+  }
+}
+
 // Initialize everything when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('DOM loaded, initializing app...');
@@ -1785,6 +1851,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load initial data
   await state.loadWebhooks();
   state.loadNotificationsSetting();
+
+  // Load config and apply default settings
+  try {
+    const config = await invoke<AppConfig>('get_app_config');
+    const isForumChannelCheckbox = document.getElementById('isForumChannel') as HTMLInputElement;
+    if (isForumChannelCheckbox && config.default_forum_mode) {
+      isForumChannelCheckbox.checked = true;
+    }
+    // Show/hide background queue button based on auto-upload setting
+    updateBackgroundQueueButtonVisibility(config.enable_auto_upload || false);
+  } catch (error) {
+    console.error('Failed to load config:', error);
+  }
 
   // Initialize thumbnail lazy loading observer
   state.initThumbnailObserver();
@@ -1826,9 +1905,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const data = event.payload;
     const updatedItems: string[] = [];
 
-    // If it's a background session (doesn't match current manual session),
+    // If it's a background session (not a manual session we started),
     // update the background panel instead of the main queue.
-    const isBackground = data.session_id && data.session_id !== state.getCurrentSessionId();
+    const isBackground = data.session_id && !state.isManualSession(data.session_id);
 
     if (isBackground) {
       state.updateBackgroundPanelFromItem(data);
@@ -1913,7 +1992,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   listen<UploadProgress & { session_id: string }>('upload-progress', (event) => {
     const data = event.payload;
-    const isBackground = data.session_id && data.session_id !== state.getCurrentSessionId();
+    const isBackground = data.session_id && !state.isManualSession(data.session_id);
 
     if (isBackground) {
       state.updateBackgroundPanelFromProgress(data);
@@ -1928,12 +2007,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('backgroundUploadPanel')?.classList.add('hidden');
   });
 
+  // Stop Background Upload Button
+  const stopBackgroundBtn = document.getElementById('stopBackgroundUpload');
+  stopBackgroundBtn?.addEventListener('click', async () => {
+    const btn = stopBackgroundBtn as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = '⏹️';
+    try {
+      await state.stopBackgroundUpload();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '⏹️';
+    }
+  });
+
   // Manual Trigger for Background Panel
   const viewBackgroundQueueBtn = document.getElementById('viewBackgroundQueueBtn');
   viewBackgroundQueueBtn?.addEventListener('click', () => {
     const panel = document.getElementById('backgroundUploadPanel');
     if (panel) {
       panel.classList.toggle('hidden');
+    }
+  });
+
+  // Listen for upload cancellation (e.g., when auto-upload is disabled mid-upload)
+  listen<string>('upload-cancelled', (event) => {
+    const cancelledSessionId = event.payload;
+    // If the cancelled session is a background session, hide the panel
+    if (cancelledSessionId === state.getBackgroundSessionId()) {
+      const panel = document.getElementById('backgroundUploadPanel');
+      if (panel) {
+        panel.classList.add('hidden');
+      }
+      state.setBackgroundSessionId(null);
+      console.log('Background upload cancelled:', cancelledSessionId);
     }
   });
 
@@ -2447,6 +2554,34 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Quick actions
   let selectedVRChatFolder: string | null = localStorage.getItem('vrchat-folder-path');
+  let ignoredFolders: string[] = [];
+
+  // Render the ignored folders list UI
+  function renderIgnoredFoldersList() {
+    const listContainer = document.getElementById('ignoredFoldersList');
+    if (!listContainer) return;
+
+    if (ignoredFolders.length === 0) {
+      listContainer.innerHTML = '<div class="ignored-folder-empty" style="color: var(--text-muted); font-size: 0.875rem;">No folders ignored</div>';
+      return;
+    }
+
+    listContainer.innerHTML = ignoredFolders.map((folder, index) => `
+      <div class="ignored-folder-item" style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: var(--bg-secondary); border-radius: 4px; margin-bottom: 4px;">
+        <span style="font-size: 0.875rem;">📁 ${folder}</span>
+        <button type="button" class="remove-ignored-folder-btn" data-index="${index}" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 6px; font-size: 0.875rem;">✕</button>
+      </div>
+    `).join('');
+
+    // Add event listeners to remove buttons
+    listContainer.querySelectorAll('.remove-ignored-folder-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const index = parseInt((e.target as HTMLElement).dataset.index || '0');
+        ignoredFolders.splice(index, 1);
+        renderIgnoredFoldersList();
+      });
+    });
+  }
 
   const openVRChatFolderBtn = document.getElementById('openVRChatFolderBtn');
   openVRChatFolderBtn?.addEventListener('click', async () => {
@@ -2496,6 +2631,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       const autoUploadCheck = document.getElementById('enableAutoUpload') as HTMLInputElement;
       if (autoUploadCheck) autoUploadCheck.checked = config.enable_auto_upload || false;
 
+      // Update background queue button visibility based on auto-upload setting
+      updateBackgroundQueueButtonVisibility(config.enable_auto_upload || false);
+
+      // Update auto-upload settings visibility
+      updateAutoUploadSettingsVisibility(config.enable_auto_upload || false);
+
       const autoUploadSelect = document.getElementById('autoUploadWebhook') as HTMLSelectElement;
       if (autoUploadSelect) {
         autoUploadSelect.innerHTML = '<option value="">Select Webhook...</option>';
@@ -2521,6 +2662,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       const mergeNoMetadata = document.getElementById('mergeNoMetadata') as HTMLInputElement;
       if (mergeNoMetadata) mergeNoMetadata.checked = config.merge_no_metadata;
 
+      const defaultForumMode = document.getElementById('defaultForumMode') as HTMLInputElement;
+      if (defaultForumMode) defaultForumMode.checked = config.default_forum_mode ?? false;
+
       const autoUploadBatchSize = document.getElementById('autoUploadBatchSize') as HTMLInputElement;
       if (autoUploadBatchSize) autoUploadBatchSize.value = (config.auto_upload_batch_size || 10).toString();
 
@@ -2528,7 +2672,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (autoUploadDelay) autoUploadDelay.value = (config.auto_upload_delay_seconds || 5).toString();
 
       const autoUploadForumChannel = document.getElementById('autoUploadForumChannel') as HTMLInputElement;
-      if (autoUploadForumChannel) autoUploadForumChannel.checked = config.auto_upload_forum_channel ?? true;
+      if (autoUploadForumChannel) autoUploadForumChannel.checked = config.auto_upload_forum_channel ?? false;
 
       const autoUploadSingleThread = document.getElementById('autoUploadSingleThread') as HTMLInputElement;
       if (autoUploadSingleThread) autoUploadSingleThread.checked = config.auto_upload_single_thread ?? false;
@@ -2551,6 +2695,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const autoUploadMergeNoMetadata = document.getElementById('autoUploadMergeNoMetadata') as HTMLInputElement;
       if (autoUploadMergeNoMetadata) autoUploadMergeNoMetadata.checked = config.auto_upload_merge_no_metadata ?? false;
 
+      // Load ignored folders
+      ignoredFolders = config.auto_upload_ignored_folders || [];
+      renderIgnoredFoldersList();
+
       // Update sub-options visibility
       updateAutoUploadGroupingVisibility();
 
@@ -2559,6 +2707,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     ModalManager.openModal('settingsModal');
+  });
+
+  // Ignored folders management
+  const addIgnoredFolderBtn = document.getElementById('addIgnoredFolderBtn');
+  const ignoredFolderInput = document.getElementById('ignoredFolderInput') as HTMLInputElement;
+
+  addIgnoredFolderBtn?.addEventListener('click', () => {
+    const folderName = ignoredFolderInput?.value?.trim();
+    if (!folderName) {
+      state.showError('Please enter a folder name');
+      return;
+    }
+
+    // Check if already in list (case-insensitive)
+    if (ignoredFolders.some(f => f.toLowerCase() === folderName.toLowerCase())) {
+      state.showError('This folder is already in the ignore list');
+      return;
+    }
+
+    ignoredFolders.push(folderName);
+    renderIgnoredFoldersList();
+    if (ignoredFolderInput) ignoredFolderInput.value = '';
+  });
+
+  // Allow pressing Enter to add folder
+  ignoredFolderInput?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addIgnoredFolderBtn?.click();
+    }
+  });
+
+  // Toggle auto-upload settings visibility when checkbox changes
+  const enableAutoUploadCheckbox = document.getElementById('enableAutoUpload') as HTMLInputElement;
+  enableAutoUploadCheckbox?.addEventListener('change', () => {
+    updateAutoUploadSettingsVisibility(enableAutoUploadCheckbox.checked);
   });
 
   const aboutBtn = document.getElementById('aboutBtn');
@@ -2961,6 +3145,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       const groupByMetadata = document.getElementById('groupByMetadata') as HTMLInputElement;
       const maxImages = document.getElementById('maxImages') as HTMLSelectElement;
 
+      // Validate background watcher settings
+      const enableAutoUpload = (document.getElementById('enableAutoUpload') as HTMLInputElement)?.checked;
+      const autoUploadWebhook = document.getElementById('autoUploadWebhook') as HTMLSelectElement;
+      const autoUploadWebhookId = parseInt(autoUploadWebhook?.value || '0');
+
+      if (enableAutoUpload) {
+        if (!autoUploadWebhookId) {
+          state.showError('Please select a webhook for background auto-upload');
+          return;
+        }
+        if (!selectedVRChatFolder) {
+          state.showError('Please select a VRChat folder for background auto-upload');
+          return;
+        }
+      }
+
       if (themeSelect) {
         const theme = themeSelect.value;
         localStorage.setItem('theme-preference', theme);
@@ -2977,24 +3177,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         auto_compress_threshold: 8,
         upload_quality: 85,
         compression_format: compressionFormat?.value || 'webp',
-        enable_auto_upload: (document.getElementById('enableAutoUpload') as HTMLInputElement)?.checked,
-        auto_upload_webhook_id: parseInt((document.getElementById('autoUploadWebhook') as HTMLSelectElement)?.value || '0') || undefined,
+        enable_auto_upload: enableAutoUpload,
+        auto_upload_webhook_id: autoUploadWebhookId || undefined,
         vrchat_path: selectedVRChatFolder || undefined,
         single_thread_mode: (document.getElementById('singleThreadMode') as HTMLInputElement)?.checked || false,
         merge_no_metadata: (document.getElementById('mergeNoMetadata') as HTMLInputElement)?.checked || false,
+        default_forum_mode: (document.getElementById('defaultForumMode') as HTMLInputElement)?.checked || false,
         auto_upload_delay_seconds: parseInt((document.getElementById('autoUploadDelay') as HTMLInputElement)?.value || '5'),
         auto_upload_batch_size: parseInt((document.getElementById('autoUploadBatchSize') as HTMLInputElement)?.value || '10'),
-        auto_upload_forum_channel: (document.getElementById('autoUploadForumChannel') as HTMLInputElement)?.checked ?? true,
+        auto_upload_forum_channel: (document.getElementById('autoUploadForumChannel') as HTMLInputElement)?.checked ?? false,
         auto_upload_single_thread: (document.getElementById('autoUploadSingleThread') as HTMLInputElement)?.checked ?? false,
         auto_upload_group_by_metadata: (document.getElementById('autoUploadGroupByMetadata') as HTMLInputElement)?.checked ?? true,
         auto_upload_group_by_world: (document.getElementById('autoUploadGroupByWorld') as HTMLInputElement)?.checked ?? true,
         auto_upload_group_by_time: (document.getElementById('autoUploadGroupByTime') as HTMLInputElement)?.checked ?? true,
         auto_upload_time_window: parseInt((document.getElementById('autoUploadTimeWindow') as HTMLInputElement)?.value || '60'),
         auto_upload_include_players: (document.getElementById('autoUploadIncludePlayers') as HTMLInputElement)?.checked ?? true,
-        auto_upload_merge_no_metadata: (document.getElementById('autoUploadMergeNoMetadata') as HTMLInputElement)?.checked ?? false
+        auto_upload_merge_no_metadata: (document.getElementById('autoUploadMergeNoMetadata') as HTMLInputElement)?.checked ?? false,
+        auto_upload_ignored_folders: ignoredFolders
       };
 
       await invoke('save_app_config', { config });
+
+      // Update background queue button visibility based on new setting
+      updateBackgroundQueueButtonVisibility(config.enable_auto_upload || false);
 
       state.showSuccess('Settings saved successfully!');
       ModalManager.closeModal('settingsModal');

@@ -29,6 +29,8 @@ pub struct Config {
     pub single_thread_mode: bool,
     #[serde(default = "default_false_config")]
     pub merge_no_metadata: bool,
+    #[serde(default = "default_false_config")]
+    pub default_forum_mode: bool,
     #[serde(default = "default_delay_config")]
     pub auto_upload_delay_seconds: u32,
     #[serde(default = "default_batch_config")]
@@ -49,6 +51,8 @@ pub struct Config {
     pub auto_upload_include_players: bool,
     #[serde(default = "default_false_config")]
     pub auto_upload_merge_no_metadata: bool,
+    #[serde(default = "default_empty_vec")]
+    pub auto_upload_ignored_folders: Vec<String>,
 }
 
 fn default_delay_config() -> u32 {
@@ -69,6 +73,10 @@ fn default_true_config() -> bool {
 
 fn default_time_window_config() -> u32 {
     60
+}
+
+fn default_empty_vec() -> Vec<String> {
+    Vec::new()
 }
 
 impl Default for Config {
@@ -94,9 +102,10 @@ impl Default for Config {
             vrchat_path: None,
             single_thread_mode: false,
             merge_no_metadata: false,
+            default_forum_mode: false,
             auto_upload_delay_seconds: 5,
             auto_upload_batch_size: 10,
-            auto_upload_forum_channel: true,
+            auto_upload_forum_channel: false,
             auto_upload_single_thread: false,
             auto_upload_group_by_metadata: true,
             auto_upload_group_by_world: true,
@@ -104,6 +113,7 @@ impl Default for Config {
             auto_upload_time_window: 60,
             auto_upload_include_players: true,
             auto_upload_merge_no_metadata: false,
+            auto_upload_ignored_folders: Vec::new(),
         }
     }
 }
@@ -124,6 +134,7 @@ impl From<Config> for AppConfig {
             vrchat_path: config.vrchat_path,
             single_thread_mode: config.single_thread_mode,
             merge_no_metadata: config.merge_no_metadata,
+            default_forum_mode: config.default_forum_mode,
             auto_upload_delay_seconds: config.auto_upload_delay_seconds,
             auto_upload_batch_size: config.auto_upload_batch_size,
             auto_upload_forum_channel: config.auto_upload_forum_channel,
@@ -134,6 +145,7 @@ impl From<Config> for AppConfig {
             auto_upload_time_window: config.auto_upload_time_window,
             auto_upload_include_players: config.auto_upload_include_players,
             auto_upload_merge_no_metadata: config.auto_upload_merge_no_metadata,
+            auto_upload_ignored_folders: config.auto_upload_ignored_folders,
         }
     }
 }
@@ -153,6 +165,7 @@ impl From<AppConfig> for Config {
             vrchat_path: app_config.vrchat_path,
             single_thread_mode: app_config.single_thread_mode,
             merge_no_metadata: app_config.merge_no_metadata,
+            default_forum_mode: app_config.default_forum_mode,
             auto_upload_delay_seconds: app_config.auto_upload_delay_seconds,
             auto_upload_batch_size: app_config.auto_upload_batch_size,
             auto_upload_forum_channel: app_config.auto_upload_forum_channel,
@@ -163,6 +176,7 @@ impl From<AppConfig> for Config {
             auto_upload_time_window: app_config.auto_upload_time_window,
             auto_upload_include_players: app_config.auto_upload_include_players,
             auto_upload_merge_no_metadata: app_config.auto_upload_merge_no_metadata,
+            auto_upload_ignored_folders: app_config.auto_upload_ignored_folders,
             ..Default::default()
         }
     }
@@ -306,11 +320,11 @@ pub fn validate_config(config: &Config) -> AppResult<()> {
     }
 
     // Validate compression format
-    let valid_formats = ["webp", "lossless_webp", "png", "jpg"];
+    let valid_formats = ["webp", "lossless_webp", "png", "jpg", "avif"];
     if !valid_formats.contains(&config.compression_format.as_str()) {
         return Err(AppError::validation(
             "compression_format",
-            "Must be 'webp', 'lossless_webp', 'png', or 'jpg'",
+            "Must be 'webp', 'lossless_webp', 'png', 'jpg', or 'avif'",
         ));
     }
 

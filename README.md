@@ -7,6 +7,8 @@
 
 A powerful desktop application for uploading VRChat photos to Discord with intelligent grouping, automatic metadata extraction, and seamless integration.
 
+> **Disclaimer**: This application is not affiliated with, endorsed by, or sponsored by VRChat Inc. or Discord Inc. VRChat and Discord are trademarks of their respective owners. This is an independent community tool.
+
 ## Features
 
 ### Smart Grouping
@@ -14,9 +16,11 @@ A powerful desktop application for uploading VRChat photos to Discord with intel
 - **Group by Time** - Configurable time windows (5 min to 2 hours, or custom)
 - **Combined Grouping** - Use both world and time-based grouping together
 - **Individual Mode** - Upload each photo as a separate message
+- **Merge No Metadata** - Optionally merge photos without metadata into adjacent groups
 
 ### Metadata Extraction
 - **Automatic Detection** - Reads embedded VRCX metadata from PNG files
+- **VRChat Native Support** - Falls back to VRChat's native XMP metadata when VRCX data is unavailable
 - **World Information** - Extracts world name, ID, and instance details
 - **Player Lists** - Captures all players present when the photo was taken
 - **Timestamps** - Preserves original photo timestamps in Discord posts
@@ -25,15 +29,25 @@ A powerful desktop application for uploading VRChat photos to Discord with intel
 ### Discord Integration
 - **Multiple Webhooks** - Save and manage multiple Discord webhooks
 - **Forum Channel Support** - Create threaded posts in Discord forum channels
+- **Single Thread Mode** - Post all groups to a single forum thread
 - **Smart Message Formatting** - Automatically handles Discord's 2000 character limit
 - **Batched Uploads** - Configurable images per message (1-10)
 - **Player Name Lists** - Optional player names in post content
+- **User Webhook Overrides** - Redirect specific players' photos to different webhooks
+
+### Background Auto-Upload
+- **Folder Watching** - Automatically detects new photos in your VRChat folder
+- **Configurable Delay** - Wait for additional photos before uploading
+- **Batch Processing** - Upload multiple photos at once
+- **Independent Settings** - Separate configuration for background uploads
+- **Stop Control** - Cancel background uploads at any time
 
 ### Image Processing
 - **Automatic Compression** - Compresses only when Discord's file size limit requires it
-- **WebP & JPEG Support** - Choose your preferred compression format
+- **Multiple Formats** - WebP (lossy/lossless), AVIF, PNG, and JPEG support
+- **Tiered Fallback** - Progressively increases compression if uploads fail
+- **Resolution Scaling** - Automatic downscaling for extremely large images
 - **Intelligent Chunking** - Splits large uploads to stay under Discord limits
-- **Retry on Failure** - Automatic retry with payload splitting for 413/400 errors
 
 ### User Experience
 - **Drag & Drop** - Simply drag photos into the app
@@ -47,6 +61,7 @@ A powerful desktop application for uploading VRChat photos to Discord with intel
 ### Tools
 - **Metadata Editor** - View, edit, and embed metadata into PNG files
 - **VRChat Folder Quick Access** - One-click access to your photos folder
+- **Background Queue Monitor** - View and control background uploads
 
 ## Installation
 
@@ -87,6 +102,17 @@ Download from the [Releases page](https://github.com/fynn9563/vrchat-photo-uploa
 | Group by World | Groups photos from the same VRChat world |
 | Group by Time | Groups photos within a time window |
 | Include Player Names | Lists players in the post content |
+| Single Thread Mode | Posts all groups to a single forum thread |
+| Merge No Metadata | Includes photos without metadata in adjacent groups |
+
+### Background Auto-Upload Settings
+| Setting | Description |
+|---------|-------------|
+| Enable Background Watcher | Automatically upload new photos |
+| VRChat Folder | Path to watch for new photos |
+| Upload Delay | Seconds to wait for additional photos |
+| Batch Size | Maximum images per message |
+| Forum Channel | Use forum posting for background uploads |
 
 ### Preferences
 | Setting | Description |
@@ -95,7 +121,8 @@ Download from the [Releases page](https://github.com/fynn9563/vrchat-photo-uploa
 | Notifications | Show system notifications on upload completion |
 | Global Shortcuts | Enable `Ctrl+Shift+U` system-wide shortcut |
 | Image Previews | Enable `Ctrl+Hover` thumbnail previews |
-| Compression Format | WebP (smaller) or JPEG (compatible) |
+| Compression Format | WebP, WebP Lossless, AVIF, PNG, or JPEG |
+| Default Forum Mode | Default state of Forum Channel checkbox |
 
 ## Keyboard Shortcuts
 
@@ -115,6 +142,7 @@ Download from the [Releases page](https://github.com/fynn9563/vrchat-photo-uploa
 >
 > This app includes safeguards to handle large files:
 > - Automatic compression (WebP/JPEG) when files exceed Discord's limit
+> - Multi-tier fallback compression (progressively reduces quality and resolution)
 > - Intelligent chunking to split uploads across multiple messages
 > - Automatic retry with smaller payloads on failure
 >

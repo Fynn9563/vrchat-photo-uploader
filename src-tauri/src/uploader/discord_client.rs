@@ -104,11 +104,9 @@ impl DiscordClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
+            let error_message = parse_discord_error_message(&error_text, status.as_u16());
             let error = AppError::UploadFailed {
-                reason: format!(
-                    "Discord API error {} for webhook {}: {}",
-                    status, webhook_url, error_text
-                ),
+                reason: error_message,
             };
 
             log::warn!(
@@ -222,11 +220,10 @@ impl DiscordClient {
                 continue;
             }
 
+            // Check for specific Discord error codes to provide better messages
+            let error_message = parse_discord_error_message(&error_text, status.as_u16());
             return Err(AppError::UploadFailed {
-                reason: format!(
-                    "Failed to send forum text message: {} - {}",
-                    status, error_text
-                ),
+                reason: error_message,
             });
         }
     }
@@ -302,8 +299,9 @@ impl DiscordClient {
                 continue;
             }
 
+            let error_message = parse_discord_error_message(&error_text, status.as_u16());
             return Err(AppError::UploadFailed {
-                reason: format!("Failed to send text message: {} - {}", status, error_text),
+                reason: error_message,
             });
         }
     }
@@ -447,6 +445,53 @@ impl UploadPayload {
 
 fn should_retry_error(status_code: u16) -> bool {
     matches!(status_code, 429 | 500 | 502 | 503 | 504)
+}
+
+/// Parse Discord error response and provide user-friendly error messages
+fn parse_discord_error_message(error_text: &str, status_code: u16) -> String {
+    // Try to parse the error as JSON to extract the code
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(error_text) {
+        if let Some(code) = json.get("code").and_then(|v| v.as_u64()) {
+            match code {
+                220003 => {
+                    return "The selected webhook is not a Discord Forum channel. Either disable 'Forum Channel' mode, or use a webhook that points to a Forum channel.".to_string();
+                }
+                40005 => {
+                    // Request entity too large - should trigger compression fallback
+                    return "Discord error (code 40005): Request entity too large. Images are being compressed automatically.".to_string();
+                }
+                50035 => {
+                    // Invalid form body - could be various issues
+                    if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
+                        return format!("Discord rejected the request: {}", message);
+                    }
+                }
+                50006 => {
+                    return "Cannot send an empty message. Please ensure there is content to send.".to_string();
+                }
+                50013 => {
+                    return "Missing permissions. The webhook may not have permission to post in this channel.".to_string();
+                }
+                10015 => {
+                    return "Unknown webhook. The webhook URL may be invalid or the webhook was deleted.".to_string();
+                }
+                _ => {
+                    // Include the Discord error code in the message for debugging
+                    if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
+                        return format!("Discord error (code {}): {}", code, message);
+                    }
+                }
+            }
+        }
+
+        // If we have a message but no code
+        if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
+            return format!("Discord error: {}", message);
+        }
+    }
+
+    // Fallback to generic message with status code
+    format!("Discord API error {}: {}", status_code, error_text)
 }
 
 /// Extract thread ID from Discord response

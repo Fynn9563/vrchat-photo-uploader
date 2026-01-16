@@ -1,14 +1,14 @@
 {
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "pnpm run dev",
+    "beforeBuildCommand": "pnpm run build",
     "devPath": "http://localhost:1420",
     "distDir": "../dist",
     "withGlobalTauri": false
   },
   "package": {
     "productName": "VRChat Photo Uploader",
-    "version": "3.0.6"
+    "version": "3.1.0"
   },
   "tauri": {
     "allowlist": {

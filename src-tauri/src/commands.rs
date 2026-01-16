@@ -106,6 +106,7 @@ pub struct AppConfig {
     pub vrchat_path: Option<String>,
     pub single_thread_mode: bool,
     pub merge_no_metadata: bool,
+    pub default_forum_mode: bool,
     pub auto_upload_delay_seconds: u32,
     pub auto_upload_batch_size: u8,
     pub auto_upload_forum_channel: bool,
@@ -116,6 +117,7 @@ pub struct AppConfig {
     pub auto_upload_time_window: u32,
     pub auto_upload_include_players: bool,
     pub auto_upload_merge_no_metadata: bool,
+    pub auto_upload_ignored_folders: Vec<String>,
 }
 
 // Progress state type (defined in main.rs, re-exported here for commands)

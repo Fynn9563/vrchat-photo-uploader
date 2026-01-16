@@ -15,7 +15,7 @@ runs:
         
         # Update package list
         sudo apt-get update -qq
-        
+
         # Install essential build tools first
         sudo apt-get install -y \
           build-essential \
@@ -24,7 +24,10 @@ runs:
           wget \
           file \
           libssl-dev \
-          xvfb
+          xvfb \
+          nasm
+
+        echo "✅ NASM installed: $(nasm -v)"
         
         # Install GTK and WebKit dependencies with version fallbacks
         sudo apt-get install -y \
@@ -154,8 +157,29 @@ runs:
 
     - name: Install system dependencies (Windows)
       if: inputs.os == 'windows'
+      shell: pwsh
+      run: |
+        Write-Host "🔧 Installing system dependencies for Windows..."
+
+        # Install NASM for optimized AVIF encoding
+        Write-Host "📦 Installing NASM..."
+        choco install nasm -y
+
+        # Add NASM to PATH for this session
+        $nasmPath = "C:\Program Files\NASM"
+        if (Test-Path $nasmPath) {
+          $env:PATH = "$nasmPath;$env:PATH"
+          Write-Host "✅ NASM installed and added to PATH"
+          nasm -v
+        } else {
+          Write-Host "⚠️ NASM installation path not found at expected location"
+        }
+
+        Write-Host "✅ Windows dependencies check completed!"
+
+    - name: Add NASM to PATH (Windows)
+      if: inputs.os == 'windows'
       shell: bash
       run: |
-        echo "🔧 Installing system dependencies for Windows..."
-        # Windows typically doesn't need additional system dependencies for Tauri
-        echo "✅ Windows dependencies check completed!"
+        # Ensure NASM is in PATH for subsequent steps
+        echo "C:\Program Files\NASM" >> $GITHUB_PATH

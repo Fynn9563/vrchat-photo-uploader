@@ -11,9 +11,6 @@ use super::discord_client::{extract_thread_id, DiscordClient, UploadPayload};
 use super::image_groups::{create_discord_payload, ImageGroup};
 use super::progress_tracker::*;
 
-/// Safe chunk size to stay under Discord's 8MB limit with overhead
-const SAFE_CHUNK_SIZE_BYTES: u64 = 7 * 1024 * 1024;
-
 /// Process the upload queue
 #[allow(clippy::too_many_arguments)]
 pub async fn process_upload_queue(
@@ -451,6 +448,7 @@ async fn process_image_group_with_failure_handling(
             is_forum_channel && is_first_group, // Only first group creates new thread
             thread_id.as_deref(),
             include_player_names,
+            group.images.len(),
         );
 
         // If this is the first message and we have overflow player messages,
@@ -538,6 +536,7 @@ async fn process_image_group_with_failure_handling(
                             let worlds_only_msg = super::image_groups::create_worlds_only_message(
                                 &group.all_worlds,
                                 group.timestamp,
+                                group.images.len(),
                             );
 
                             match client
@@ -601,6 +600,7 @@ async fn process_image_group_with_failure_handling(
                                         let (summary_msg, link_messages) =
                                             super::image_groups::create_compact_world_messages(
                                                 &group.all_worlds,
+                                                group.images.len(),
                                             );
 
                                         // Create thread with summary message
@@ -752,6 +752,7 @@ async fn process_image_group_with_failure_handling(
                             let worlds_only_msg = super::image_groups::create_worlds_only_message(
                                 &group.all_worlds,
                                 group.timestamp,
+                                group.images.len(),
                             );
 
                             let worlds_result = client
@@ -803,6 +804,7 @@ async fn process_image_group_with_failure_handling(
                                         let (summary_msg, link_messages) =
                                             super::image_groups::create_compact_world_messages(
                                                 &group.all_worlds,
+                                                group.images.len(),
                                             );
 
                                         // Send summary message
@@ -1248,10 +1250,16 @@ pub async fn upload_image_chunk_with_thread_id(
                 return Err(AppError::upload_cancelled("before compression", session_id));
             }
 
-            // Check if it was a 413 error (Payload Too Large)
-            if e.to_string().contains("413") || e.to_string().contains("Payload Too Large") {
-                log::info!("Payload too large ({}), switching to compression mode for {} files in session {}", 
-                    e.to_string().lines().next().unwrap_or("unknown error"), 
+            // Check if it was a size-related error (413 HTTP status or Discord error 40005)
+            let err_str = e.to_string();
+            if err_str.contains("413")
+                || err_str.contains("Payload Too Large")
+                || err_str.contains("40005")
+                || err_str.contains("too large")
+                || err_str.contains("Request entity too large")
+            {
+                log::info!("Payload too large ({}), switching to compression mode for {} files in session {}",
+                    err_str.lines().next().unwrap_or("unknown error"),
                     file_paths.len(),
                     session_id);
                 upload_compressed_chunk_with_thread_id(
@@ -1331,48 +1339,6 @@ async fn try_upload_chunk_with_thread_id(
     client
         .send_webhook_with_thread_id(&webhook.url, &payload, thread_id)
         .await
-}
-
-/// Split files into chunks based on file size
-/// Returns Vec of (file_paths, total_size) for each chunk
-fn split_into_size_chunks(file_paths: &[String]) -> Vec<Vec<String>> {
-    let mut chunks = Vec::new();
-    let mut current_chunk = Vec::new();
-    let mut current_size: u64 = 0;
-
-    for path in file_paths {
-        let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-
-        // If single file exceeds limit, put it alone in a chunk
-        if file_size > SAFE_CHUNK_SIZE_BYTES {
-            // First, save current chunk if not empty
-            if !current_chunk.is_empty() {
-                chunks.push(current_chunk);
-                current_chunk = Vec::new();
-                current_size = 0;
-            }
-            // Add oversized file as its own chunk
-            chunks.push(vec![path.clone()]);
-            continue;
-        }
-
-        // Would adding this file exceed the limit?
-        if current_size + file_size > SAFE_CHUNK_SIZE_BYTES && !current_chunk.is_empty() {
-            chunks.push(current_chunk);
-            current_chunk = Vec::new();
-            current_size = 0;
-        }
-
-        current_chunk.push(path.clone());
-        current_size += file_size;
-    }
-
-    // Don't forget the last chunk
-    if !current_chunk.is_empty() {
-        chunks.push(current_chunk);
-    }
-
-    chunks
 }
 
 /// Upload with compression
