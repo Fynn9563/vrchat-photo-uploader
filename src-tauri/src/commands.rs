@@ -3,11 +3,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
 
-use crate::errors::AppError;
 use crate::security::InputValidator;
 use crate::{config, database, image_processor, metadata_editor, uploader};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Webhook {
     pub id: i64,
     pub name: String,
@@ -27,6 +26,16 @@ pub struct UploadRequest {
     pub grouping_time_window: u32,
     #[serde(default = "default_true")]
     pub group_by_world: bool,
+    pub upload_quality: Option<u8>,
+    pub compression_format: Option<String>,
+    #[serde(default = "default_false")]
+    pub single_thread_mode: bool,
+    #[serde(default = "default_false")]
+    pub merge_no_metadata: bool,
+}
+
+fn default_false() -> bool {
+    false
 }
 
 fn default_time_window() -> u32 {
@@ -91,7 +100,24 @@ pub struct AppConfig {
     pub enable_global_shortcuts: bool,
     pub auto_compress_threshold: u64, // MB
     pub upload_quality: u8,
-    pub compression_format: String, // "webp" or "jpg"
+    pub compression_format: String, // "webp", "lossless_webp", "png", "jpg"
+    pub enable_auto_upload: bool,
+    pub auto_upload_webhook_id: Option<i64>,
+    pub vrchat_path: Option<String>,
+    pub single_thread_mode: bool,
+    pub merge_no_metadata: bool,
+    pub default_forum_mode: bool,
+    pub auto_upload_delay_seconds: u32,
+    pub auto_upload_batch_size: u8,
+    pub auto_upload_forum_channel: bool,
+    pub auto_upload_single_thread: bool,
+    pub auto_upload_group_by_metadata: bool,
+    pub auto_upload_group_by_world: bool,
+    pub auto_upload_group_by_time: bool,
+    pub auto_upload_time_window: u32,
+    pub auto_upload_include_players: bool,
+    pub auto_upload_merge_no_metadata: bool,
+    pub auto_upload_ignored_folders: Vec<String>,
 }
 
 // Progress state type (defined in main.rs, re-exported here for commands)
@@ -176,6 +202,10 @@ pub async fn retry_failed_group(
             true,  // include_player_names = true (default for retries)
             10,    // grouping_time_window = 10 minutes (default)
             true,  // group_by_world = true (default)
+            None,  // upload_quality
+            None,  // compression_format
+            false, // single_thread_mode
+            false, // merge_no_metadata
             progress_state_clone,
             new_session_id_clone,
             app_handle_clone,
@@ -188,7 +218,7 @@ pub async fn retry_failed_group(
 }
 
 #[tauri::command]
-pub async fn add_webhook(name: String, url: String) -> Result<(), String> {
+pub async fn add_webhook(name: String, url: String, is_forum: bool) -> Result<(), String> {
     // Validate inputs
     InputValidator::validate_webhook_name(&name)?;
     InputValidator::validate_webhook_url(&url)?;
@@ -196,9 +226,32 @@ pub async fn add_webhook(name: String, url: String) -> Result<(), String> {
     // Sanitize name
     let sanitized_name = InputValidator::sanitize_filename(&name);
 
-    database::insert_webhook(sanitized_name, url, false) // Always set is_forum to false
+    database::insert_webhook(sanitized_name, url, is_forum)
         .await
         .map(|_| ()) // Convert i64 to ()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_webhook(
+    id: i64,
+    name: String,
+    url: String,
+    is_forum: bool,
+) -> Result<(), String> {
+    if id <= 0 {
+        return Err("Invalid webhook ID".to_string());
+    }
+
+    // Validate inputs
+    InputValidator::validate_webhook_name(&name)?;
+    InputValidator::validate_webhook_url(&url)?;
+
+    // Sanitize name
+    let sanitized_name = InputValidator::sanitize_filename(&name);
+
+    database::update_webhook(id, sanitized_name, url, is_forum)
+        .await
         .map_err(|e| e.to_string())
 }
 
@@ -216,120 +269,26 @@ pub async fn delete_webhook(id: i64) -> Result<(), String> {
 #[tauri::command]
 pub async fn upload_images(
     request: UploadRequest,
-    progress_state: State<'_, ProgressState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
-    // Validate request
-    if request.file_paths.is_empty() {
-        return Err("No files provided".to_string());
-    }
-
-    // Validate webhook_id before proceeding
-    if request.webhook_id <= 0 {
-        return Err("Please select a webhook before starting upload".to_string());
-    }
-
-    // SPECIAL VALIDATION FOR FORUM CHANNELS:
-    let effective_max_images = if request.is_forum_channel {
-        if request.max_images_per_message > 10 {
-            log::warn!("Forum channel detected with max_images > 10. Reducing to 10 to prevent thread_id issues.");
-            10
-        } else {
-            request.max_images_per_message
-        }
-    } else {
-        request.max_images_per_message
+    let options = uploader::SessionOptions {
+        webhook_id: request.webhook_id,
+        file_paths: request.file_paths,
+        group_by_metadata: request.group_by_metadata,
+        max_images_per_message: request.max_images_per_message,
+        is_forum_channel: request.is_forum_channel,
+        include_player_names: request.include_player_names,
+        grouping_time_window: request.grouping_time_window,
+        group_by_world: request.group_by_world,
+        upload_quality: request.upload_quality,
+        compression_format: request.compression_format,
+        single_thread_mode: request.single_thread_mode,
+        merge_no_metadata: request.merge_no_metadata,
     };
 
-    InputValidator::validate_upload_settings(effective_max_images, request.group_by_metadata)?;
-
-    // Validate all file paths
-    for file_path in &request.file_paths {
-        InputValidator::validate_image_file(file_path)?;
-    }
-
-    let session_id = uuid::Uuid::new_v4().to_string();
-
-    // Initialize progress
-    {
-        let mut progress = progress_state.lock().unwrap();
-        progress.insert(
-            session_id.clone(),
-            UploadProgress {
-                total_images: request.file_paths.len(),
-                completed: 0,
-                current_image: None,
-                current_progress: 0.0,
-                failed_uploads: Vec::new(),
-                successful_uploads: Vec::new(),
-                session_status: "active".to_string(),
-                estimated_time_remaining: None,
-            },
-        );
-    }
-
-    // Get webhook details - this is where the error was occurring
-    let webhook = match database::get_webhook_by_id(request.webhook_id).await {
-        Ok(webhook) => webhook,
-        Err(AppError::Database(sqlx::Error::RowNotFound)) => {
-            return Err("Selected webhook not found. Please select a valid webhook.".to_string());
-        }
-        Err(e) => {
-            log::error!(
-                "Database error when fetching webhook {}: {}",
-                request.webhook_id,
-                e
-            );
-            return Err(format!("Failed to fetch webhook: {}", e));
-        }
-    };
-
-    // Create upload session in database
-    database::create_upload_session(
-        session_id.clone(),
-        request.webhook_id,
-        request.file_paths.len() as i32,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-
-    // Update webhook usage
-    database::update_webhook_usage(request.webhook_id)
+    uploader::SessionManager::start_session(&app_handle, options)
         .await
-        .map_err(|e| e.to_string())?;
-
-    // Log forum channel usage for debugging
-    if request.is_forum_channel {
-        log::info!(
-            "Forum channel upload started: {} files, max {} per message",
-            request.file_paths.len(),
-            effective_max_images
-        );
-    }
-
-    // Start upload process
-    let progress_state_clone = progress_state.inner().clone();
-    let session_id_clone = session_id.clone();
-    let app_handle_clone = app_handle.clone();
-
-    tokio::spawn(async move {
-        uploader::process_upload_queue(
-            webhook,
-            request.file_paths,
-            request.group_by_metadata,
-            effective_max_images,
-            request.is_forum_channel,
-            request.include_player_names,
-            request.grouping_time_window,
-            request.group_by_world,
-            progress_state_clone,
-            session_id_clone,
-            app_handle_clone,
-        )
-        .await;
-    });
-
-    Ok(session_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -367,6 +326,8 @@ pub async fn retry_failed_upload(
     tokio::spawn(async move {
         uploader::retry_single_upload(
             webhook,
+            None, // upload_quality
+            None, // compression_format
             file_path,
             progress_state_clone,
             session_id_clone,
@@ -512,10 +473,15 @@ fn num_cpus() -> usize {
 }
 
 #[tauri::command]
-pub fn generate_thumbnail(file_path: String) -> Result<String, String> {
+pub async fn generate_thumbnail(file_path: String) -> Result<String, String> {
     InputValidator::validate_image_file(&file_path)?;
 
-    image_processor::generate_thumbnail(&file_path, 200).map_err(|e| e.to_string())
+    // Run heavy image processing in a blocking task to avoid blocking the async runtime
+    tokio::task::spawn_blocking(move || {
+        image_processor::generate_thumbnail(&file_path, 200).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -604,7 +570,11 @@ pub async fn get_app_config() -> Result<AppConfig, String> {
 }
 
 #[tauri::command]
-pub async fn save_app_config(config: AppConfig) -> Result<(), String> {
+pub async fn save_app_config(
+    config: AppConfig,
+    watcher_state: State<'_, Mutex<crate::background_watcher::BackgroundWatcher>>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
     // Validate config
     if let Some(max_images) = Some(config.max_images_per_message) {
         InputValidator::validate_upload_settings(max_images, config.group_by_metadata)?;
@@ -614,7 +584,27 @@ pub async fn save_app_config(config: AppConfig) -> Result<(), String> {
         return Err("Upload quality must be between 1 and 100".to_string());
     }
 
-    config::save_config(config).map_err(|e| e.to_string())
+    let enable_auto = config.enable_auto_upload;
+    let vrchat_path = config.vrchat_path.clone();
+
+    config::save_config(config).map_err(|e| e.to_string())?;
+
+    // Manage background watcher
+    if let Ok(mut watcher) = watcher_state.lock() {
+        if enable_auto {
+            if let Some(path) = vrchat_path {
+                if let Err(e) = watcher.start(app_handle, path) {
+                    log::error!("Failed to update background watcher: {}", e);
+                }
+            } else {
+                watcher.stop();
+            }
+        } else {
+            watcher.stop();
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -801,14 +791,52 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<(), Strin
                     }
                 }
             } else {
-                log::info!("No updates available");
-                app_handle.emit_all("no-update-available", {}).ok();
+                log::info!("No update available");
                 Ok(())
             }
         }
         Err(e) => {
             log::error!("Failed to check for updates: {}", e);
-            Err(format!("Failed to check for updates: {}", e))
+            Err(e.to_string())
         }
     }
+}
+
+// User Webhook Override Commands
+
+#[tauri::command]
+pub async fn get_user_webhook_overrides() -> Result<Vec<database::UserWebhookOverride>, String> {
+    database::get_user_webhook_overrides()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn add_user_webhook_override(
+    user_id: Option<String>,
+    user_display_name: Option<String>,
+    webhook_id: i64,
+) -> Result<i64, String> {
+    if user_id.is_none() && user_display_name.is_none() {
+        return Err("Must provide either User ID or User Display Name".to_string());
+    }
+
+    if webhook_id <= 0 {
+        return Err("Invalid webhook ID".to_string());
+    }
+
+    database::add_user_webhook_override(user_id, user_display_name, webhook_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_user_webhook_override(id: i64) -> Result<(), String> {
+    if id <= 0 {
+        return Err("Invalid override ID".to_string());
+    }
+
+    database::delete_user_webhook_override(id)
+        .await
+        .map_err(|e| e.to_string())
 }

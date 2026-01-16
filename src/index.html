@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,6 +8,7 @@
   <link rel="stylesheet" href="./styles.css">
   <script type="module" src="./main.ts"></script>
 </head>
+
 <body>
   <div class="container">
     <div class="header">
@@ -63,6 +65,19 @@
               <option value="10" selected>10</option>
             </select>
           </div>
+
+          <div class="setting-item setting-item-toggle">
+            <div class="setting-toggle">
+              <input type="checkbox" id="singleThreadMode" class="toggle-input" />
+              <label for="singleThreadMode" class="toggle-label">
+                <span class="toggle-switch"></span>
+              </label>
+            </div>
+            <div class="setting-content">
+              <span class="setting-title">Single Thread Mode</span>
+              <span class="setting-description">Upload all to one thread</span>
+            </div>
+          </div>
         </div>
 
         <!-- Grouping Section -->
@@ -108,7 +123,8 @@
                     <option value="120">2 hours</option>
                     <option value="custom">Custom</option>
                   </select>
-                  <input type="number" id="groupingTimeWindow" class="option-input hidden" min="1" max="1440" value="10" placeholder="10">
+                  <input type="number" id="groupingTimeWindow" class="option-input hidden" min="1" max="1440" value="10"
+                    placeholder="10">
                   <span id="timeInputSuffix" class="option-suffix hidden">min</span>
                 </div>
               </div>
@@ -118,6 +134,14 @@
                 <label for="includePlayerNames" class="option-label">
                   <span class="option-icon">👥</span>
                   <span class="option-text">Include player names in posts</span>
+                </label>
+              </div>
+
+              <div class="option-item option-item-full">
+                <input type="checkbox" id="mergeNoMetadata" class="checkbox" />
+                <label for="mergeNoMetadata" class="option-label">
+                  <span class="option-icon">🧩</span>
+                  <span class="option-text">Merge unknown photos with previous group</span>
                 </label>
               </div>
             </div>
@@ -133,13 +157,7 @@
         <div class="drop-zone-icon">📸</div>
         <div class="drop-zone-text">Drag & drop your VRChat photos here</div>
         <div class="drop-zone-subtext">or click to browse files</div>
-        <input
-          type="file"
-          id="fileInput"
-          multiple
-          accept="image/*"
-          class="hidden"
-        />
+        <input type="file" id="fileInput" multiple accept="image/*" class="hidden" />
       </div>
 
       <div id="uploadQueue" class="upload-queue hidden">
@@ -155,12 +173,15 @@
             <button id="removeSelectedBtn" class="btn btn-small btn-secondary">
               🗑️ Remove Selected
             </button>
+            <button id="removeSuccessfulBtn" class="btn btn-small btn-secondary">
+              ✨ Remove Successful
+            </button>
           </div>
           <div class="form-help">
             Hold Ctrl and hover over thumbnails for quick previews.
           </div>
         </div>
-        
+
         <div id="progressSummary" class="progress-summary hidden">
           <div class="progress-info">
             <span id="progressText" class="progress-text">Preparing upload…</span>
@@ -173,9 +194,9 @@
             </div>
           </div>
         </div>
-        
+
         <div id="queueItems" class="queue-items"></div>
-        
+
         <div class="upload-controls">
           <button id="startUpload" class="btn btn-primary">
             🚀 Start Upload
@@ -193,7 +214,7 @@
       </div>
     </div>
 
-<!-- Tools -->
+    <!-- Tools -->
     <div class="card">
       <h2 class="card-title">⚡ Tools</h2>
       <div class="tools-grid">
@@ -202,6 +223,9 @@
         </button>
         <button id="metadataEditorBtn" class="btn btn-secondary">
           ✏️ Edit Metadata
+        </button>
+        <button id="viewBackgroundQueueBtn" class="btn btn-secondary">
+          👁️ View Background Queue
         </button>
       </div>
     </div>
@@ -231,27 +255,17 @@
       <div class="modal-body">
         <div class="form-group">
           <label for="webhookName" class="form-label">Webhook Name</label>
-          <input
-            type="text"
-            id="webhookName"
-            class="form-control"
-            placeholder="My Discord Server"
-            maxlength="100"
-          />
+          <input type="text" id="webhookName" class="form-control" placeholder="My Discord Server" maxlength="100" />
         </div>
 
         <div class="form-group">
           <label for="webhookUrl" class="form-label">Webhook URL</label>
-          <input
-            type="url"
-            id="webhookUrl"
-            class="form-control"
-            placeholder="https://discord.com/api/webhooks/…"
-          />
+          <input type="url" id="webhookUrl" class="form-control" placeholder="https://discord.com/api/webhooks/…" />
           <div class="form-help">
             Get this from Discord: Server Settings → Integrations → Webhooks
           </div>
         </div>
+
 
         <div class="modal-actions">
           <button id="addWebhookBtn" class="btn btn-primary">
@@ -274,7 +288,33 @@
           </div>
         </div>
       </div>
+
+      <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+
+      <div class="form-group">
+        <label class="form-label">👤 User Webhook Overrides</label>
+        <div class="form-help" style="margin-bottom: 10px;">
+          Route photos of specific users to specific webhooks.
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 15px;">
+          <input type="text" id="overrideUserInput" class="form-control" placeholder="User Name or ID (usr_...)" />
+          <select id="overrideWebhookSelect" class="form-control">
+            <option value="">Select Webhook...</option>
+          </select>
+          <button id="addOverrideBtn" class="btn btn-primary" style="white-space: nowrap;">
+            ➕ Link
+          </button>
+        </div>
+
+        <div class="overrides-container"
+          style="max-height: 150px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px; padding: 5px;">
+          <!-- List items will be injected here -->
+          <div id="overridesList" class="overrides-list"></div>
+        </div>
+      </div>
     </div>
+  </div>
   </div>
 
   <!-- Settings Modal -->
@@ -296,26 +336,34 @@
                 <option value="auto">🔄 Auto</option>
               </select>
             </div>
-            
+
             <div class="checkbox-group">
               <input type="checkbox" id="enableNotifications" class="checkbox" checked />
               <label for="enableNotifications" class="form-label">Show upload notifications</label>
             </div>
-            
+
             <div class="checkbox-group">
               <input type="checkbox" id="enableGlobalShortcuts" class="checkbox" checked />
               <label for="enableGlobalShortcuts" class="form-label">Enable global shortcuts</label>
             </div>
-            
+
             <div class="checkbox-group">
               <input type="checkbox" id="enableImagePreview" class="checkbox" checked />
               <label for="enableImagePreview" class="form-label">Enable Ctrl+Hover image previews</label>
+            </div>
+
+            <div class="checkbox-group">
+              <input type="checkbox" id="defaultForumMode" class="checkbox" />
+              <label for="defaultForumMode" class="form-label">Default Forum Channel mode to ON</label>
             </div>
 
             <div class="form-group" style="margin-top: 16px;">
               <label for="compressionFormat" class="form-label">Compression Format</label>
               <select id="compressionFormat" class="form-control">
                 <option value="webp">WebP (smaller files, recommended)</option>
+                <option value="lossless_webp">WebP (Lossless)</option>
+                <option value="avif">AVIF (best compression, slower)</option>
+                <option value="png">PNG (Smart Resizing >10MB)</option>
                 <option value="jpg">JPEG (better compatibility)</option>
               </select>
               <div class="form-help">Format used when images need to be compressed for Discord</div>
@@ -335,17 +383,102 @@
           </div>
           <div class="form-help">Current VRChat photos folder location</div>
         </div>
-      </div>
-        <div class="modal-actions">
-          <button id="saveSettingsBtn" class="btn btn-primary">
-            💾 Save Settings
-          </button>
-          <button id="cancelSettingsBtn" class="btn btn-secondary">
-            ❌ Cancel
-          </button>
+
+        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+
+        <div class="form-group">
+          <label class="form-label">🔄 Automatic Background Uploads</label>
+          <div class="checkbox-group">
+            <input type="checkbox" id="enableAutoUpload" class="checkbox" />
+            <label for="enableAutoUpload" class="form-label">Enable background watcher</label>
+          </div>
+          <div class="form-help">Automatically uploads new photos detected in the VRChat folder. requires VRChat Folder
+            to be set.</div>
+
+          <div id="autoUploadSettings" class="form-group sub-settings hidden" style="margin-left: 20px; margin-top: 10px;">
+            <label class="form-label">Target Webhook</label>
+            <select id="autoUploadWebhook" class="form-control" style="margin-bottom: 10px;">
+              <option value="">Select Webhook...</option>
+            </select>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div class="form-group">
+                <label for="autoUploadBatchSize" class="form-label">Batch Size</label>
+                <input type="number" id="autoUploadBatchSize" class="form-control" min="1" max="10" value="10" />
+                <div class="form-help">Max photos per post</div>
+              </div>
+              <div class="form-group">
+                <label for="autoUploadDelay" class="form-label">Batch Delay (sec)</label>
+                <input type="number" id="autoUploadDelay" class="form-control" min="1" max="3600" value="5" />
+                <div class="form-help">Wait after last photo</div>
+              </div>
+            </div>
+
+            <div class="checkbox-group">
+              <input type="checkbox" id="autoUploadForumChannel" class="checkbox" checked />
+              <label for="autoUploadForumChannel" class="form-label">Forum Channel Support</label>
+            </div>
+
+            <div class="checkbox-group">
+              <input type="checkbox" id="autoUploadSingleThread" class="checkbox" />
+              <label for="autoUploadSingleThread" class="form-label">Single Thread Mode</label>
+            </div>
+
+            <div class="checkbox-group">
+              <input type="checkbox" id="autoUploadGroupByMetadata" class="checkbox" checked />
+              <label for="autoUploadGroupByMetadata" class="form-label">Smart Grouping</label>
+            </div>
+
+            <div id="autoUploadGroupingOptions"
+              style="margin-left: 20px; border-left: 2px solid var(--border-color); padding-left: 10px; margin-top: 10px;">
+              <div class="checkbox-group">
+                <input type="checkbox" id="autoUploadGroupByWorld" class="checkbox" checked />
+                <label for="autoUploadGroupByWorld" class="form-label">Group by World</label>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="autoUploadGroupByTime" class="checkbox" checked />
+                <label for="autoUploadGroupByTime" class="form-label">Group by Time</label>
+              </div>
+              <div class="form-group">
+                <label for="autoUploadTimeWindow" class="form-label">Time Window (min)</label>
+                <input type="number" id="autoUploadTimeWindow" class="form-control" min="1" max="1440" value="60" />
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="autoUploadIncludePlayers" class="checkbox" checked />
+                <label for="autoUploadIncludePlayers" class="form-label">Include Player Names</label>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="autoUploadMergeNoMetadata" class="checkbox" />
+                <label for="autoUploadMergeNoMetadata" class="form-label">Merge No-Metadata Photos</label>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <label class="form-label">📁 Ignored Folders</label>
+              <div class="form-help" style="margin-bottom: 8px;">
+                Folders to skip during auto-upload (e.g., Emoji, Stickers, Prints)
+              </div>
+              <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                <input type="text" id="ignoredFolderInput" class="form-control" placeholder="Folder name to ignore..." style="flex: 1;" />
+                <button type="button" id="addIgnoredFolderBtn" class="btn btn-secondary">➕ Add</button>
+              </div>
+              <div id="ignoredFoldersList" class="ignored-folders-list" style="max-height: 120px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px;">
+                <div class="ignored-folder-empty" style="color: var(--text-muted); font-size: 0.875rem;">No folders ignored</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+      <div class="modal-actions">
+        <button id="saveSettingsBtn" class="btn btn-primary">
+          💾 Save Settings
+        </button>
+        <button id="cancelSettingsBtn" class="btn btn-secondary">
+          ❌ Cancel
+        </button>
+      </div>
     </div>
+  </div>
   </div>
 
   <!-- About Modal -->
@@ -361,24 +494,25 @@
           <div class="app-icon">📸</div>
           <h2>VRChat Photo Uploader</h2>
           <p class="version-info">Version <span id="aboutVersion">Loading...</span></p>
-          
+
           <p class="description">
-            A powerful tool for uploading VRChat photos to Discord with intelligent 
+            A powerful tool for uploading VRChat photos to Discord with intelligent
             grouping, metadata extraction, and automatic compression when needed.
           </p>
 
           <div class="features">
             <h3>Features:</h3>
             <ul>
-              <li>🏷️ Automatic metadata extraction from VRChat photos</li>
-              <li>📋 Smart grouping by world and players</li>
-              <li>🗜️ Automatic compression only when Discord requires it</li>
-              <li>🔄 Retry failed uploads with exponential backoff</li>
-              <li>📊 Upload statistics and progress tracking</li>
+              <li>🏷️ Automatic metadata extraction (VRCX & VRChat native)</li>
+              <li>📋 Smart grouping by world, time, and players</li>
+              <li>🗜️ Tiered compression fallback system</li>
+              <li>🔄 Background auto-upload with folder watching</li>
+              <li>📊 Real-time upload progress with ETA</li>
               <li>🎨 Dark/Light theme support</li>
               <li>⚡ Global keyboard shortcuts</li>
-              <li>💬 Discord Forum channel support</li>
-              <li>👁️ Ctrl+Hover image previews in upload queue</li>
+              <li>💬 Discord Forum channel & single thread mode</li>
+              <li>👁️ Ctrl+Hover image previews</li>
+              <li>🔀 User webhook overrides per player</li>
             </ul>
           </div>
 
@@ -400,7 +534,11 @@
             <p>Created by <strong>Fynn9563</strong></p>
             <p>Made with ❤️ for the VRChat community</p>
           </div>
-          
+
+          <p class="disclaimer" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 15px; text-align: center;">
+            This application is not affiliated with, endorsed by, or sponsored by VRChat Inc. or Discord Inc.
+          </p>
+
           <div class="update-section">
             <button id="checkUpdatesBtn" class="btn btn-primary" style="margin-top: 15px;">
               🔄 Check for Updates
@@ -412,87 +550,80 @@
     </div>
   </div>
 
-<!-- Metadata Editor Modal -->
-<div id="metadataEditorModal" class="modal hidden">
-  <div class="modal-content" style="max-width: 800px;">
-    <div class="modal-header">
-      <h3 class="modal-title">📝 Metadata Editor</h3>
-      <button class="close-btn" aria-label="Close">&times;</button>
-    </div>
-
-    <div class="modal-body">
-      <!-- Load Existing Metadata Section -->
-      <div class="form-group">
-        <label class="form-label">Load Existing Metadata</label>
-        <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
-          <button id="loadPngMetadataBtn" class="btn btn-secondary">📂 Load PNG Metadata</button>
-          <span id="creationDate" style="color: var(--text-muted); font-size: 0.875rem;"></span>
-        </div>
+  <!-- Metadata Editor Modal -->
+  <div id="metadataEditorModal" class="modal hidden">
+    <div class="modal-content" style="max-width: 800px;">
+      <div class="modal-header">
+        <h3 class="modal-title">📝 Metadata Editor</h3>
+        <button class="close-btn" aria-label="Close">&times;</button>
       </div>
 
-      <!-- Raw JSON Section -->
-      <div class="form-group">
-        <label for="rawJsonText" class="form-label">Or Paste Raw JSON:</label>
-        <textarea 
-          id="rawJsonText" 
-          class="form-control" 
-          rows="6" 
-          placeholder="Paste JSON metadata here..."
-        ></textarea>
-        <button id="loadRawJsonBtn" class="btn btn-secondary" style="margin-top: 8px;">📋 Load Raw JSON</button>
-      </div>
-
-      <!-- Metadata Form Fields -->
-      <div class="settings-grid">
+      <div class="modal-body">
+        <!-- Load Existing Metadata Section -->
         <div class="form-group">
-          <label for="authorDisplayName" class="form-label">Author Display Name</label>
-          <input type="text" id="authorDisplayName" class="form-control" placeholder="Player display name">
+          <label class="form-label">Load Existing Metadata</label>
+          <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
+            <button id="loadPngMetadataBtn" class="btn btn-secondary">📂 Load PNG Metadata</button>
+            <span id="creationDate" style="color: var(--text-muted); font-size: 0.875rem;"></span>
+          </div>
+        </div>
+
+        <!-- Raw JSON Section -->
+        <div class="form-group">
+          <label for="rawJsonText" class="form-label">Or Paste Raw JSON:</label>
+          <textarea id="rawJsonText" class="form-control" rows="6" placeholder="Paste JSON metadata here..."></textarea>
+          <button id="loadRawJsonBtn" class="btn btn-secondary" style="margin-top: 8px;">📋 Load Raw JSON</button>
+        </div>
+
+        <!-- Metadata Form Fields -->
+        <div class="settings-grid">
+          <div class="form-group">
+            <label for="authorDisplayName" class="form-label">Author Display Name</label>
+            <input type="text" id="authorDisplayName" class="form-control" placeholder="Player display name">
+          </div>
+
+          <div class="form-group">
+            <label for="authorId" class="form-label">Author ID</label>
+            <input type="text" id="authorId" class="form-control"
+              placeholder="usr_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          </div>
+
+          <div class="form-group">
+            <label for="worldName" class="form-label">World Name</label>
+            <input type="text" id="worldName" class="form-control" placeholder="World name">
+          </div>
+
+          <div class="form-group">
+            <label for="worldId" class="form-label">World ID</label>
+            <input type="text" id="worldId" class="form-control"
+              placeholder="wrld_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          </div>
+
+          <div class="form-group">
+            <label for="worldInstanceId" class="form-label">World Instance ID</label>
+            <input type="text" id="worldInstanceId" class="form-control" placeholder="Instance ID">
+          </div>
         </div>
 
         <div class="form-group">
-          <label for="authorId" class="form-label">Author ID</label>
-          <input type="text" id="authorId" class="form-control" placeholder="usr_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          <label for="playersText" class="form-label">Players (one per line as: displayName, id)</label>
+          <textarea id="playersText" class="form-control" rows="6"
+            placeholder="PlayerName, usr_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx&#10;AnotherPlayer, usr_yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"></textarea>
         </div>
 
+        <!-- Actions Section -->
         <div class="form-group">
-          <label for="worldName" class="form-label">World Name</label>
-          <input type="text" id="worldName" class="form-control" placeholder="World name">
+          <label class="form-label">Actions</label>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+            <button id="selectPngForEmbeddingBtn" class="btn btn-secondary">📁 Select PNG for Embedding</button>
+            <button id="embedMetadataBtn" class="btn btn-primary" disabled>💾 Embed Metadata into PNG</button>
+          </div>
+          <div id="selectedPngInfo" class="form-help" style="margin-top: 8px;"></div>
         </div>
-
-        <div class="form-group">
-          <label for="worldId" class="form-label">World ID</label>
-          <input type="text" id="worldId" class="form-control" placeholder="wrld_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-        </div>
-
-        <div class="form-group">
-          <label for="worldInstanceId" class="form-label">World Instance ID</label>
-          <input type="text" id="worldInstanceId" class="form-control" placeholder="Instance ID">
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label for="playersText" class="form-label">Players (one per line as: displayName, id)</label>
-        <textarea 
-          id="playersText" 
-          class="form-control" 
-          rows="6" 
-          placeholder="PlayerName, usr_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx&#10;AnotherPlayer, usr_yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"
-        ></textarea>
-      </div>
-
-      <!-- Actions Section -->
-      <div class="form-group">
-        <label class="form-label">Actions</label>
-        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-          <button id="selectPngForEmbeddingBtn" class="btn btn-secondary">📁 Select PNG for Embedding</button>
-          <button id="embedMetadataBtn" class="btn btn-primary" disabled>💾 Embed Metadata into PNG</button>
-        </div>
-        <div id="selectedPngInfo" class="form-help" style="margin-top: 8px;"></div>
       </div>
     </div>
   </div>
-</div>
-  
+
   <!-- Toast Container -->
   <div id="toastContainer" class="toast-container"></div>
 
@@ -511,5 +642,27 @@
       <div id="loadingProgressText" class="loading-progress-text">0%</div>
     </div>
   </div>
+
+  <!-- Background Upload Panel -->
+  <div id="backgroundUploadPanel" class="background-upload-panel hidden">
+    <div class="background-panel-header">
+      <span class="panel-icon">🔄</span>
+      <span class="panel-title">Background Auto-Upload</span>
+      <button id="stopBackgroundUpload" class="stop-background-btn" aria-label="Stop">⏹️</button>
+      <button id="closeBackgroundPanel" class="close-panel-btn" aria-label="Close">&times;</button>
+    </div>
+    <div class="background-panel-content">
+      <div class="background-progress-info">
+        <span id="backgroundProgressText" class="progress-text">Processing...</span>
+        <span id="backgroundProgressCount">0 / 0</span>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar-overall">
+          <div id="backgroundProgressFill" class="progress-bar-fill"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
+
 </html>

@@ -156,6 +156,24 @@ pub async fn init_database() -> AppResult<()> {
     .execute(&pool)
     .await?;
 
+    // Create table for user-specific webhook overrides
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS user_webhook_overrides (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            user_display_name TEXT,
+            webhook_id INTEGER NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (webhook_id) REFERENCES webhooks (id) ON DELETE CASCADE,
+            UNIQUE(user_id, webhook_id),
+            UNIQUE(user_display_name, webhook_id)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
     // Add indexes for better query performance
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_upload_history_hash ON upload_history(file_hash)")
         .execute(&pool)
@@ -178,6 +196,10 @@ pub async fn init_database() -> AppResult<()> {
     )
     .execute(&pool)
     .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_upload_history_path ON upload_history(file_path)")
+        .execute(&pool)
+        .await?;
 
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_upload_sessions_webhook ON upload_sessions(webhook_id)",
@@ -342,6 +364,20 @@ pub async fn insert_webhook(name: String, url: String, is_forum: bool) -> AppRes
     }
 }
 
+pub async fn update_webhook(id: i64, name: String, url: String, is_forum: bool) -> AppResult<()> {
+    let pool = get_pool()?;
+
+    sqlx::query("UPDATE webhooks SET name = ?, url = ?, is_forum = ? WHERE id = ?")
+        .bind(name)
+        .bind(url)
+        .bind(is_forum)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
 pub async fn delete_webhook(id: i64) -> AppResult<()> {
     let pool = get_pool()?;
 
@@ -495,4 +531,90 @@ pub async fn cleanup_old_upload_history(days: i32) -> AppResult<u64> {
     .await?;
 
     Ok(result.rows_affected())
+}
+
+// User Webhook Overrides
+#[derive(Debug, serde::Serialize)]
+pub struct UserWebhookOverride {
+    pub id: i64,
+    pub user_id: Option<String>,
+    pub user_display_name: Option<String>,
+    pub webhook_id: i64,
+}
+
+pub async fn get_user_webhook_overrides() -> AppResult<Vec<UserWebhookOverride>> {
+    let pool = get_pool()?;
+
+    let rows = sqlx::query(
+        "SELECT id, user_id, user_display_name, webhook_id FROM user_webhook_overrides ORDER BY id DESC",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut overrides = Vec::new();
+    for row in rows {
+        overrides.push(UserWebhookOverride {
+            id: row.get("id"),
+            user_id: row.get("user_id"),
+            user_display_name: row.get("user_display_name"),
+            webhook_id: row.get("webhook_id"),
+        });
+    }
+
+    Ok(overrides)
+}
+
+pub async fn add_user_webhook_override(
+    user_id: Option<String>,
+    user_display_name: Option<String>,
+    webhook_id: i64,
+) -> AppResult<i64> {
+    let pool = get_pool()?;
+
+    if user_id.is_none() && user_display_name.is_none() {
+        return Err(AppError::validation(
+            "user",
+            "Must provide either User ID or User Display Name",
+        ));
+    }
+
+    let result = sqlx::query(
+        "INSERT INTO user_webhook_overrides (user_id, user_display_name, webhook_id) VALUES (?, ?, ?)",
+    )
+    .bind(user_id)
+    .bind(user_display_name)
+    .bind(webhook_id)
+    .execute(pool)
+    .await;
+
+    match result {
+        Ok(result) => Ok(result.last_insert_rowid()),
+        Err(e) => Err(AppError::Database(e)),
+    }
+}
+
+pub async fn delete_user_webhook_override(id: i64) -> AppResult<()> {
+    let pool = get_pool()?;
+
+    let result = sqlx::query("DELETE FROM user_webhook_overrides WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::Database(sqlx::Error::RowNotFound));
+    }
+
+    Ok(())
+}
+
+pub async fn is_file_processed(file_path: &str) -> AppResult<bool> {
+    let pool = get_pool()?;
+    let row = sqlx::query("SELECT COUNT(*) as count FROM upload_history WHERE file_path = ? AND upload_status = 'success'")
+        .bind(file_path)
+        .fetch_one(pool)
+        .await?;
+
+    let count: i32 = row.get("count");
+    Ok(count > 0)
 }

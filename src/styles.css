@@ -296,11 +296,11 @@ body {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
-.toggle-input:checked + .toggle-label .toggle-switch {
+.toggle-input:checked+.toggle-label .toggle-switch {
     background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
 }
 
-.toggle-input:checked + .toggle-label .toggle-switch::after {
+.toggle-input:checked+.toggle-label .toggle-switch::after {
     left: 23px;
     background: white;
 }
@@ -789,8 +789,13 @@ body {
 }
 
 @keyframes thumbnail-loading {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
+    0% {
+        background-position: 200% 0;
+    }
+
+    100% {
+        background-position: -200% 0;
+    }
 }
 
 .status-icon {
@@ -811,44 +816,54 @@ body {
 }
 
 @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* Image Preview Feature */
 .image-preview {
     position: fixed;
-    z-index: 10001; /* Above toast notifications */
-    pointer-events: none; /* Don't interfere with mouse events */
+    z-index: 10001;
+    /* Above toast notifications */
+    pointer-events: none;
+    /* Don't interfere with mouse events */
     opacity: 0;
     transform: scale(0.8);
-    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
-                transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     border-radius: var(--border-radius-lg);
     box-shadow: var(--shadow-lg);
     border: 2px solid var(--accent-primary);
     background: var(--bg-primary);
     overflow: hidden;
-    
+
     /* VRChat aspect ratio optimization */
     max-width: 400px;
     max-height: 400px;
-    
+
     /* Default to landscape 16:9 */
-    width: 356px;  /* 16:9 at 200px height = 356px width */
+    width: 356px;
+    /* 16:9 at 200px height = 356px width */
     height: 200px;
 }
 
 /* Portrait mode 9:16 aspect ratio */
 .image-preview.portrait {
-    width: 225px;  /* 9:16 at 400px height = 225px width */
+    width: 225px;
+    /* 9:16 at 400px height = 225px width */
     height: 400px;
 }
 
 /* Large landscape mode for high-res images */
 .image-preview.landscape-large {
     width: 400px;
-    height: 225px; /* 16:9 at 400px width = 225px height */
+    height: 225px;
+    /* 16:9 at 400px width = 225px height */
 }
 
 /* Square fallback for non-standard ratios */
@@ -865,9 +880,11 @@ body {
 .image-preview img {
     width: 100%;
     height: 100%;
-    object-fit: cover; /* Fill the container maintaining aspect ratio */
+    object-fit: cover;
+    /* Fill the container maintaining aspect ratio */
     display: block;
-    border-radius: calc(var(--border-radius-lg) - 2px); /* Account for border */
+    border-radius: calc(var(--border-radius-lg) - 2px);
+    /* Account for border */
 }
 
 .image-preview-info {
@@ -932,6 +949,7 @@ body {
         opacity: 0;
         transform: scale(0.8) translateY(10px);
     }
+
     to {
         opacity: 1;
         transform: scale(1) translateY(0);
@@ -943,6 +961,7 @@ body {
         opacity: 1;
         transform: scale(1) translateY(0);
     }
+
     to {
         opacity: 0;
         transform: scale(0.8) translateY(-10px);
@@ -1347,13 +1366,27 @@ kbd {
 }
 
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 @keyframes slideIn {
-    from { transform: translateX(-100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
+    from {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
 }
 
 /* Scrollbar Styling */
@@ -1381,88 +1414,92 @@ kbd {
     .container {
         padding: 16px;
     }
-    
+
     .title {
         font-size: 2rem;
     }
-    
+
     .subtitle {
         font-size: 1rem;
     }
-    
+
     .card {
         padding: 20px;
         margin-bottom: 20px;
     }
-    
+
     .settings-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .tools-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .webhook-selector {
         flex-direction: column;
         align-items: stretch;
     }
-    
+
     .webhook-selector select {
         min-width: auto;
     }
-    
+
     .queue-header {
         flex-direction: column;
         align-items: stretch;
     }
-    
+
     .progress-info {
         flex-direction: column;
         align-items: stretch;
         gap: 4px;
     }
-    
+
     .modal-content {
         margin: 0;
         max-height: 100vh;
         border-radius: 0;
     }
-    
+
     .modal-actions {
         flex-direction: column;
     }
-    
+
     .upload-controls {
         flex-direction: column;
     }
-    
+
     .quick-actions {
         flex-direction: column;
     }
-    
+
     /* Mobile VRChat image preview adjustments */
     .image-preview {
         /* Scale down proportionally for mobile */
         max-width: 280px;
         max-height: 280px;
     }
-    
+
     .image-preview.landscape-large {
         width: 280px;
-        height: 158px; /* 16:9 at 280px width */
+        height: 158px;
+        /* 16:9 at 280px width */
     }
-    
+
     .image-preview.portrait {
-        width: 158px;  /* 9:16 at 280px height */
+        width: 158px;
+        /* 9:16 at 280px height */
         height: 280px;
     }
-    
+
     .image-preview {
-        width: 250px;   /* Default landscape smaller */
-        height: 141px;  /* 16:9 at 250px width */
+        width: 250px;
+        /* Default landscape smaller */
+        height: 141px;
+        /* 16:9 at 250px width */
     }
-    
+
     .image-preview.square {
         width: 220px;
         height: 220px;
@@ -1473,65 +1510,69 @@ kbd {
     .container {
         padding: 12px;
     }
-    
+
     .card {
         padding: 16px;
     }
-    
+
     .btn {
         padding: 10px 16px;
         font-size: 13px;
     }
-    
+
     .form-control {
         padding: 10px 12px;
         font-size: 13px;
     }
-    
+
     .drop-zone {
         padding: 32px 16px;
         min-height: 150px;
     }
-    
+
     .drop-zone-icon {
         font-size: 2.5rem;
     }
-    
+
     .modal-content {
         padding: 20px;
     }
-    
+
     .toast-container {
         top: 10px;
         right: 10px;
         left: 10px;
     }
-    
+
     .toast {
         max-width: none;
     }
-    
+
     /* Smaller mobile VRChat preview */
     .image-preview {
         max-width: 240px;
         max-height: 240px;
     }
-    
+
     .image-preview.landscape-large {
         width: 240px;
-        height: 135px; /* 16:9 at 240px width */
+        height: 135px;
+        /* 16:9 at 240px width */
     }
-    
+
     .image-preview.portrait {
-        width: 135px;  /* 9:16 at 240px height */
+        width: 135px;
+        /* 9:16 at 240px height */
         height: 240px;
     }
-    
+
     .image-preview {
-        width: 213px;   /* Default landscape at 120px height */
-        height: 120px;  /* 16:9 smaller for mobile */
+        width: 213px;
+        /* Default landscape at 120px height */
+        height: 120px;
+        /* 16:9 smaller for mobile */
     }
-    
+
     .image-preview.square {
         width: 180px;
         height: 180px;
@@ -1554,25 +1595,25 @@ kbd {
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
     }
-    
+
     .drop-zone.dragover {
         transform: none;
     }
-    
+
     .btn:hover:not(:disabled) {
         transform: none;
     }
-    
+
     .card:hover {
         transform: none;
     }
-    
+
     /* Disable preview animations for reduced motion */
     .image-preview {
         transition: none !important;
         animation: none !important;
     }
-    
+
     .queue-thumbnail:hover {
         transform: none !important;
     }
@@ -1614,4 +1655,156 @@ kbd {
 .update-section .btn {
     width: 100%;
     max-width: 200px;
+}
+
+/* Background Upload Panel */
+.background-upload-panel {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 320px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--accent-primary);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-lg);
+    z-index: 1000;
+    overflow: hidden;
+    transition: var(--transition);
+    transform: translateY(0);
+}
+
+.background-upload-panel.hidden {
+    display: none;
+    transform: translateY(100px);
+    opacity: 0;
+}
+
+.background-panel-header {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: white;
+}
+
+.panel-icon {
+    font-size: 1.1rem;
+    animation: spin-background 3s linear infinite;
+}
+
+@keyframes spin-background {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.panel-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    flex: 1;
+}
+
+.stop-background-btn {
+    background: rgba(239, 68, 68, 0.3);
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.9rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px 8px;
+    transition: var(--transition);
+    margin-right: 8px;
+}
+
+.stop-background-btn:hover {
+    background: rgba(239, 68, 68, 0.5);
+    color: white;
+}
+
+.stop-background-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.close-panel-btn {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 1.5rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0 4px;
+    transition: var(--transition);
+}
+
+.close-panel-btn:hover {
+    color: white;
+}
+
+.background-panel-content {
+    padding: 16px;
+}
+
+.background-progress-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.background-progress-info .progress-text {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.background-progress-info #backgroundProgressCount {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.background-panel-content .progress-bar-overall {
+    height: 8px;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.background-panel-content .progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+.background-panel-content .progress-bar-fill.error {
+    background: var(--error) !important;
+}
+
+.background-panel-content .progress-bar-fill.warning {
+    background: var(--warning) !important;
+    animation: pulsing-warning 2s infinite;
+}
+
+@keyframes pulsing-warning {
+    0% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
+
+    100% {
+        opacity: 1;
+    }
 }

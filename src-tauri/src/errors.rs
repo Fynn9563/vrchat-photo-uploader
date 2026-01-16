@@ -15,6 +15,9 @@ pub enum AppError {
     #[error("Image processing error: {0}")]
     Image(#[from] image::ImageError),
 
+    #[error("Image processing failure: {0}")]
+    ImageProcessing(String),
+
     #[error("Network error: {0}")]
     Network(#[from] reqwest::Error),
 
