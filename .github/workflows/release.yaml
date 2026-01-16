@@ -391,7 +391,19 @@ jobs:
   build-test:
     needs: get-version
     if: needs.get-version.outputs.should_release == 'false'
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'windows-latest'
+            os: 'windows'
+            artifact-name: 'pr-build-windows-x64'
+            binary-path: 'src-tauri/target/release/VRChat-Photo-Uploader.exe'
+          - platform: 'ubuntu-22.04'
+            os: 'ubuntu'
+            artifact-name: 'pr-build-linux-x64'
+            binary-path: 'src-tauri/target/release/VRChat-Photo-Uploader'
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
@@ -418,9 +430,10 @@ jobs:
       - name: Install system dependencies
         uses: ./.github/actions/install-system-deps
         with:
-          os: ubuntu
+          os: ${{ matrix.os }}
 
       - name: Install frontend dependencies
+        shell: bash
         run: |
           echo "PNPM version: $(pnpm --version)"
 
@@ -437,6 +450,7 @@ jobs:
         run: pnpm run build
 
       - name: Test Tauri build
+        shell: bash
         run: |
           cd src-tauri
           cargo build --release --features nasm
@@ -445,18 +459,20 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: pr-build-linux-x64
+          name: ${{ matrix.artifact-name }}
           path: |
-            src-tauri/target/release/VRChat-Photo-Uploader
+            ${{ matrix.binary-path }}
             src-tauri/target/release/bundle/
           retention-days: 7
 
       - name: Run frontend tests
+        shell: bash
         run: |
           echo "🧪 Running frontend unit tests..."
           pnpm test:run || echo "⚠️ Frontend tests failed"
 
       - name: Run Rust tests
+        shell: bash
         run: |
           echo "🦀 Running Rust tests..."
           cd src-tauri
