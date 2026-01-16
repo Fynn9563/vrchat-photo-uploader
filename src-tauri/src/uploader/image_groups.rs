@@ -469,7 +469,11 @@ fn create_thread_title(all_worlds: &[WorldInfo], image_count: usize) -> String {
 }
 
 /// Creates a message with just worlds (no players) - used for first retry when combined message is too long
-pub fn create_worlds_only_message(all_worlds: &[WorldInfo], timestamp: Option<i64>, image_count: usize) -> String {
+pub fn create_worlds_only_message(
+    all_worlds: &[WorldInfo],
+    timestamp: Option<i64>,
+    image_count: usize,
+) -> String {
     let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
     if all_worlds.is_empty() {
         let mut content = format!("📸 {}", photo_word);
@@ -504,7 +508,10 @@ pub fn create_worlds_only_message(all_worlds: &[WorldInfo], timestamp: Option<i6
 
 /// Creates a compact world summary (names only) and separate links messages
 /// Returns (summary_message, link_messages) - used when there are many worlds
-pub fn create_compact_world_messages(all_worlds: &[WorldInfo], image_count: usize) -> (String, Vec<String>) {
+pub fn create_compact_world_messages(
+    all_worlds: &[WorldInfo],
+    image_count: usize,
+) -> (String, Vec<String>) {
     const MAX_LENGTH: usize = 1900;
     let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
 

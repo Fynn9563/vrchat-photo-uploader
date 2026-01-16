@@ -95,7 +95,10 @@ impl BackgroundWatcher {
                                     if is_image_file(&path_str) {
                                         // Check if file is in an ignored folder
                                         if is_in_ignored_folder(&path_str, &ignored_folders) {
-                                            log::debug!("Ignoring file in ignored folder: {}", path_str);
+                                            log::debug!(
+                                                "Ignoring file in ignored folder: {}",
+                                                path_str
+                                            );
                                             continue;
                                         }
 
@@ -318,8 +321,11 @@ fn start_batch_monitor(
                                     {
                                         let state = app_handle.state::<ProgressState>();
                                         if let Ok(mut progress) = state.inner().lock() {
-                                            if let Some(session_progress) = progress.get_mut(&session_id) {
-                                                session_progress.session_status = "cancelled".to_string();
+                                            if let Some(session_progress) =
+                                                progress.get_mut(&session_id)
+                                            {
+                                                session_progress.session_status =
+                                                    "cancelled".to_string();
                                                 log::info!("Background session {} cancelled due to auto-upload being disabled", session_id);
                                             }
                                         }

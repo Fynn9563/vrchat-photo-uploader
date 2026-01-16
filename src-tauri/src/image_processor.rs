@@ -1087,7 +1087,8 @@ async fn compress_image_with_format_internal(
             let mut output = Vec::new();
             {
                 let mut encoder = JpegEncoder::new_with_quality(&mut output, quality);
-                encoder.encode_image(&img)
+                encoder
+                    .encode_image(&img)
                     .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
             }
             fs::write(&output_path_clone, output)?;
@@ -1172,7 +1173,12 @@ pub async fn resize_image_box(file_path: &str, scale: f32) -> AppResult<String> 
         let width = (img.width() as f32 * scale) as u32;
         let height = (img.height() as f32 * scale) as u32;
 
-        log::info!("Resizing {} to {}x{} (Lanczos3)", file_path_owned, width, height);
+        log::info!(
+            "Resizing {} to {}x{} (Lanczos3)",
+            file_path_owned,
+            width,
+            height
+        );
 
         // Using Lanczos3 for high quality downscaling (better than Box for photos)
         let resized = img.resize(width, height, image::imageops::FilterType::Lanczos3);
@@ -1251,9 +1257,7 @@ async fn encode_avif(
         // Quality in ravif is 0-100 where 100 is best quality
         // Speed is 1-10 where 1 is slowest/best and 10 is fastest
         // Use speed 8 for faster encoding (good balance for batch uploads)
-        let encoder = Encoder::new()
-            .with_quality(quality as f32)
-            .with_speed(8);
+        let encoder = Encoder::new().with_quality(quality as f32).with_speed(8);
 
         // Encode the image
         let result = encoder

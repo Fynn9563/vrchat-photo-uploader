@@ -467,7 +467,8 @@ fn parse_discord_error_message(error_text: &str, status_code: u16) -> String {
                     }
                 }
                 50006 => {
-                    return "Cannot send an empty message. Please ensure there is content to send.".to_string();
+                    return "Cannot send an empty message. Please ensure there is content to send."
+                        .to_string();
                 }
                 50013 => {
                     return "Missing permissions. The webhook may not have permission to post in this channel.".to_string();
