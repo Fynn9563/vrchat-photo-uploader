@@ -16,12 +16,32 @@ use super::upload_queue::upload_image_chunk_with_thread_id;
 /// Retry a failed upload
 pub async fn retry_single_upload(
     webhook: Webhook,
+    upload_quality: Option<u8>,
+    compression_format: Option<String>,
     file_path: String,
     progress_state: ProgressState,
     session_id: String,
     app_handle: tauri::AppHandle,
 ) {
     let client = DiscordClient::new();
+
+    // Resolve compression settings (Config Priority: Request Override > Global Config > Default)
+    let config = crate::config::load_config().ok();
+    let default_quality = 85;
+    let default_format = "webp".to_string();
+
+    let effective_quality = upload_quality.unwrap_or_else(|| {
+        config
+            .as_ref()
+            .map(|c| c.upload_quality)
+            .unwrap_or(default_quality)
+    });
+    let effective_format = compression_format.unwrap_or_else(|| {
+        config
+            .as_ref()
+            .map(|c| c.compression_format.clone())
+            .unwrap_or(default_format)
+    });
 
     if let Err(e) = security::InputValidator::validate_image_file(&file_path) {
         update_progress_failure(
@@ -60,6 +80,7 @@ pub async fn retry_single_upload(
         webhook.is_forum,
         None,
         true,
+        1, // Single image retry
     );
 
     let dummy_progress_state = Arc::new(Mutex::new(HashMap::new()));
@@ -69,10 +90,12 @@ pub async fn retry_single_upload(
         &webhook,
         vec![file_path.clone()],
         text_fields,
-        None,
+        None, // thread_id
         &dummy_progress_state,
         "retry",
         &app_handle,
+        effective_quality,
+        effective_format,
     )
     .await
     {

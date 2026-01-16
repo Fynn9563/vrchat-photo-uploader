@@ -13,10 +13,14 @@ pub struct ImageGroup {
 }
 
 /// Groups images by world and time window
+// Update signature and implementation
 pub async fn group_images_by_metadata(
     file_paths: Vec<String>,
     time_window_minutes: u32,
     group_by_world: bool,
+    merge_no_metadata: bool,
+    app_handle: tauri::AppHandle,
+    session_id: String,
 ) -> Vec<ImageGroup> {
     let mut image_data: Vec<(String, Option<ImageMetadata>, Option<i64>, String)> = Vec::new();
     let no_time_limit = time_window_minutes == 0;
@@ -26,23 +30,102 @@ pub async fn group_images_by_metadata(
         (time_window_minutes as i64) * 60
     };
 
-    // Extract metadata and compute group keys
-    for file_path in file_paths {
-        log::debug!("Extracting metadata for: {}", file_path);
-        let metadata = image_processor::extract_metadata(&file_path)
-            .await
-            .ok()
-            .flatten();
-        let timestamp = image_processor::get_timestamp_from_filename(&file_path);
+    // Parallel metadata extraction
+    // Use a semaphore to limit concurrency
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use tauri::Manager;
+    use tokio::sync::Semaphore;
 
+    let max_concurrent = std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(4)
+        .min(16);
+    let semaphore = Arc::new(Semaphore::new(max_concurrent));
+    let results_mutex = Arc::new(Mutex::new(Vec::with_capacity(file_paths.len())));
+
+    let total_files = file_paths.len();
+    let completed_counter = Arc::new(AtomicUsize::new(0));
+
+    let mut handles = Vec::new();
+
+    for (index, file_path) in file_paths.into_iter().enumerate() {
+        let sem = semaphore.clone();
+        let results = results_mutex.clone();
+        let completed = completed_counter.clone();
+        let app_handle = app_handle.clone();
+        let session_id = session_id.clone();
+
+        handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await.unwrap();
+            log::debug!("Extracting metadata for: {}", file_path);
+
+            let metadata = image_processor::extract_metadata(&file_path)
+                .await
+                .ok()
+                .flatten();
+            let timestamp = image_processor::get_timestamp_from_filename(&file_path);
+
+            let mut guard = results.lock().unwrap();
+            guard.push((index, file_path, metadata, timestamp));
+
+            // Emit progress
+            let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
+            // Emit batch updates to avoid flooding event loop for 5000 items
+            if done % 5 == 0 || done == total_files {
+                app_handle.emit_all("upload-progress", serde_json::json!({
+                    "session_id": session_id,
+                    "total_images": total_files,
+                    "completed": 0, // Uploads completed
+                    "current_progress": (done as f64 / total_files as f64) * 100.0,
+                    "session_status": format!("Preparing images... {}/{}", done, total_files),
+                    // We can also send a custom event if main listener expects distinct fields
+                 })).ok();
+            }
+        }));
+    }
+
+    // Wait for all
+    for handle in handles {
+        if let Err(e) = handle.await {
+            log::error!("Metadata extraction task failed: {}", e);
+        }
+    }
+
+    // Extract results and sort by original index to maintain order
+    let mut collected_results = match Arc::try_unwrap(results_mutex) {
+        Ok(mutex) => mutex.into_inner().unwrap(),
+        Err(arc) => arc.lock().unwrap().clone(), // Fallback clone
+    };
+    collected_results.sort_by_key(|r| r.0);
+
+    let mut last_valid_group_key: Option<String> = None;
+
+    // Sequential grouping logic (must be sequential for context)
+    for (_index, file_path, metadata, timestamp) in collected_results {
         let group_key = if let Some(ref meta) = metadata {
-            create_metadata_key(
+            let key = create_metadata_key(
                 meta,
                 timestamp,
                 time_window_seconds,
                 no_time_limit,
                 group_by_world,
-            )
+            );
+            // Update last valid key if we found metadata
+            if merge_no_metadata {
+                last_valid_group_key = Some(key.clone());
+            }
+            key
+        } else if merge_no_metadata && last_valid_group_key.is_some() {
+            // If merging is enabled and we have a previous group, use it!
+            let key = last_valid_group_key.as_ref().unwrap().clone();
+            log::info!(
+                "Merging no-metadata file {} into previous group: {}",
+                file_path,
+                key
+            );
+            key
         } else if no_time_limit {
             "unknown_all".to_string()
         } else if let Some(ts) = timestamp {
@@ -53,6 +136,14 @@ pub async fn group_images_by_metadata(
 
         image_data.push((file_path, metadata, timestamp, group_key));
     }
+
+    log::info!(
+        "Grouping {} images (window: {}m, world: {}, merge_no_meta: {})",
+        image_data.len(),
+        time_window_minutes,
+        group_by_world,
+        merge_no_metadata
+    );
 
     // Group images and collect players and worlds
     let mut groups: HashMap<String, ImageGroup> = HashMap::new();
@@ -196,6 +287,7 @@ pub fn create_discord_payload(
     is_forum_post: bool,
     _thread_id: Option<&str>,
     include_player_names: bool,
+    image_count: usize,
 ) -> (HashMap<String, String>, Vec<String>) {
     let mut payload = HashMap::new();
     let mut overflow_messages = Vec::new();
@@ -207,11 +299,12 @@ pub fn create_discord_payload(
             all_players,
             timestamp,
             include_player_names,
+            image_count,
         );
         payload.insert("content".to_string(), content);
 
         if is_forum_post {
-            let thread_name = create_thread_title(all_worlds);
+            let thread_name = create_thread_title(all_worlds, image_count);
             payload.insert("thread_name".to_string(), thread_name);
         }
 
@@ -233,14 +326,18 @@ fn create_message_content_with_players(
     all_players: &[PlayerInfo],
     timestamp: Option<i64>,
     include_player_names: bool,
+    image_count: usize,
 ) -> (String, Vec<PlayerInfo>, bool) {
     const MAX_LENGTH: usize = 1900;
     let mut content = String::new();
     let mut remaining_players: Vec<PlayerInfo> = Vec::new();
     let mut had_players_in_main = false;
 
+    // Use singular "Photo" for 1 image, plural "Photos" for multiple
+    let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
+
     if !all_worlds.is_empty() {
-        content.push_str("📸 Photos taken at ");
+        content.push_str(&format!("📸 {} taken at ", photo_word));
 
         let world_parts: Vec<String> = all_worlds
             .iter()
@@ -301,7 +398,7 @@ fn create_message_content_with_players(
             }
         }
     } else {
-        content.push_str("📸 Photos");
+        content.push_str(&format!("📸 {}", photo_word));
         if let Some(ts) = timestamp {
             content.push_str(&format!(" taken at <t:{}:f>", ts));
         }
@@ -356,31 +453,37 @@ fn create_overflow_player_messages(
     messages
 }
 
-fn create_thread_title(all_worlds: &[WorldInfo]) -> String {
+fn create_thread_title(all_worlds: &[WorldInfo], image_count: usize) -> String {
+    let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
     if !all_worlds.is_empty() {
         let world_names: Vec<&str> = all_worlds.iter().map(|w| w.name.as_str()).collect();
-        let title = format!("📸 Photos from {}", world_names.join(", "));
+        let title = format!("📸 {} from {}", photo_word, world_names.join(", "));
         if title.len() > 100 {
             format!("{}...", &title[..97])
         } else {
             title
         }
     } else {
-        "📸 Photos".to_string()
+        format!("📸 {}", photo_word)
     }
 }
 
 /// Creates a message with just worlds (no players) - used for first retry when combined message is too long
-pub fn create_worlds_only_message(all_worlds: &[WorldInfo], timestamp: Option<i64>) -> String {
+pub fn create_worlds_only_message(
+    all_worlds: &[WorldInfo],
+    timestamp: Option<i64>,
+    image_count: usize,
+) -> String {
+    let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
     if all_worlds.is_empty() {
-        let mut content = String::from("📸 Photos");
+        let mut content = format!("📸 {}", photo_word);
         if let Some(ts) = timestamp {
             content.push_str(&format!(" taken at <t:{}:f>", ts));
         }
         return content;
     }
 
-    let mut content = String::from("📸 Photos taken at ");
+    let mut content = format!("📸 {} taken at ", photo_word);
 
     let world_parts: Vec<String> = all_worlds
         .iter()
@@ -405,15 +508,19 @@ pub fn create_worlds_only_message(all_worlds: &[WorldInfo], timestamp: Option<i6
 
 /// Creates a compact world summary (names only) and separate links messages
 /// Returns (summary_message, link_messages) - used when there are many worlds
-pub fn create_compact_world_messages(all_worlds: &[WorldInfo]) -> (String, Vec<String>) {
+pub fn create_compact_world_messages(
+    all_worlds: &[WorldInfo],
+    image_count: usize,
+) -> (String, Vec<String>) {
     const MAX_LENGTH: usize = 1900;
+    let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
 
     if all_worlds.is_empty() {
-        return ("📸 Photos".to_string(), vec![]);
+        return (format!("📸 {}", photo_word), vec![]);
     }
 
     // Build summary message with world names (bullet list)
-    let mut summary = format!("📸 Photos from {} worlds:\n", all_worlds.len());
+    let mut summary = format!("📸 {} from {} worlds:\n", photo_word, all_worlds.len());
     for world in all_worlds.iter() {
         summary.push_str(&format!("• {}\n", world.name));
     }

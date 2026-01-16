@@ -6,7 +6,9 @@ pub mod discord_client;
 pub mod image_groups;
 pub mod progress_tracker;
 pub mod retry;
+pub mod session_manager;
 pub mod upload_queue;
 
 pub use retry::retry_single_upload;
+pub use session_manager::{SessionManager, SessionOptions};
 pub use upload_queue::process_upload_queue;

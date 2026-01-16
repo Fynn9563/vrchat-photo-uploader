@@ -1,10 +1,11 @@
 {
   "name": "vrcx-image-to-discord",
   "private": true,
-  "version": "3.0.6",
+  "version": "3.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:nasm": "tauri dev --features nasm",
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",

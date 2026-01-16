@@ -1,6 +1,7 @@
 use crate::commands::FailedUpload;
 use crate::errors::{safe_progress_read, safe_progress_update, ProgressState};
 use std::path::Path;
+use tauri::Manager;
 use tokio::time::Instant;
 
 /// Check if session is cancelled
@@ -24,6 +25,29 @@ pub fn mark_session_cancelled(progress_state: &ProgressState, session_id: &str) 
             session_id,
             progress.completed
         );
+    });
+}
+
+/// Generic update progress function
+pub fn update_progress(
+    progress_state: &ProgressState,
+    session_id: &str,
+    total_images: usize,
+    completed: usize,
+    current_image: Option<String>,
+    current_progress: f32,
+    session_status: &str, // "active", "completed", "failed"
+) {
+    safe_progress_update(progress_state, session_id, "generic update", |progress| {
+        progress.total_images = total_images;
+        progress.completed = completed;
+        if let Some(img) = current_image.clone() {
+            progress.current_image = Some(img);
+        }
+        progress.current_progress = current_progress;
+        if !session_status.is_empty() {
+            progress.session_status = session_status.to_string();
+        }
     });
 }
 
@@ -242,4 +266,24 @@ pub fn mark_session_failed(progress_state: &ProgressState, session_id: &str) {
             progress.failed_uploads.len()
         );
     });
+}
+
+/// Emit full session progress to UI
+pub fn emit_session_progress(
+    app_handle: &tauri::AppHandle,
+    progress_state: &ProgressState,
+    session_id: &str,
+) {
+    if let Some(progress) =
+        safe_progress_read(progress_state, session_id, "emit progress", |p| p.clone())
+    {
+        let mut payload = serde_json::to_value(&progress).unwrap_or(serde_json::Value::Null);
+        if let serde_json::Value::Object(ref mut map) = payload {
+            map.insert(
+                "session_id".to_string(),
+                serde_json::Value::String(session_id.to_string()),
+            );
+        }
+        app_handle.emit_all("upload-progress", payload).ok();
+    }
 }
