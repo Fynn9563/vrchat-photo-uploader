@@ -26,8 +26,7 @@ pub fn check_single_instance() -> Result<(), SingleInstanceError> {
                         || process_name.contains("uploader")
                     {
                         log::info!(
-                            "Found existing instance (PID: {}), signaling it to show",
-                            pid
+                            "Found existing instance (PID: {pid}), signaling it to show"
                         );
                         signal_existing_instance();
                         return Err(SingleInstanceError); // Exit this instance
@@ -43,9 +42,9 @@ pub fn check_single_instance() -> Result<(), SingleInstanceError> {
     // Create lock file with current process ID
     let current_pid = std::process::id();
     if let Err(e) = fs::write(&lock_file, current_pid.to_string()) {
-        log::warn!("Failed to create lock file: {}", e);
+        log::warn!("Failed to create lock file: {e}");
     } else {
-        log::info!("Created lock file with PID: {}", current_pid);
+        log::info!("Created lock file with PID: {current_pid}");
     }
 
     Ok(())
@@ -62,7 +61,7 @@ fn signal_existing_instance() {
     // Create a signal file that the existing instance can detect
     let signal_file = std::env::temp_dir().join("vrchat_photo_uploader_show.signal");
     if let Err(e) = fs::write(&signal_file, "show") {
-        log::warn!("Failed to create signal file: {}", e);
+        log::warn!("Failed to create signal file: {e}");
     } else {
         log::info!("Created signal file to show existing instance");
     }
@@ -73,7 +72,7 @@ pub fn cleanup_lock_file() {
     let lock_file = get_lock_file_path();
     if lock_file.exists() {
         if let Err(e) = fs::remove_file(&lock_file) {
-            log::warn!("Failed to remove lock file: {}", e);
+            log::warn!("Failed to remove lock file: {e}");
         } else {
             log::info!("Cleaned up lock file");
         }
@@ -106,15 +105,15 @@ pub fn start_signal_checker(app_handle: AppHandle) {
                 let _ = fs::remove_file(&signal_file);
 
                 // Show and focus window
-                if let Some(window) = app_handle.get_window("main") {
+                if let Some(window) = app_handle.get_webview_window("main") {
                     if let Err(e) = window.show() {
-                        log::error!("Failed to show window: {}", e);
+                        log::error!("Failed to show window: {e}");
                     }
                     if let Err(e) = window.unminimize() {
-                        log::error!("Failed to unminimize window: {}", e);
+                        log::error!("Failed to unminimize window: {e}");
                     }
                     if let Err(e) = window.set_focus() {
-                        log::error!("Failed to focus window: {}", e);
+                        log::error!("Failed to focus window: {e}");
                     }
 
                     // On Windows, use a trick to bring window to front

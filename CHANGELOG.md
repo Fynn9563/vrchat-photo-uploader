@@ -1,5 +1,28 @@
 # Changelog
 
+## [4.0.0] - 2026-02-22
+
+### Added
+- **Comprehensive test suite** — 483 tests (394 Rust backend + 89 TypeScript frontend)
+  - Unit tests for discord client, image grouping, background watcher, config, errors, and metadata editor
+  - Integration tests for database CRUD, metadata extraction/embedding, image compression, and security
+  - Real Discord webhook tests (text, images, forum threads, compression-to-upload for all 6 formats)
+  - Frontend tests for Tauri command mocks, state management, event handling, and UI validation
+  - Shared test infrastructure with programmatic PNG generation, VRCX metadata fixtures, and in-memory SQLite
+  - CI integration with GitHub Secrets for Discord webhook tests on push
+
+### Changed
+- **Migrated from Tauri v1 to Tauri v2** - Major framework upgrade for improved performance, security, and long-term support
+- Upgraded all Tauri plugins to v2 (dialog, fs, notification, shell, updater, global-shortcut, os)
+- Updated auto-updater to Tauri v2 updater plugin with v1-compatible artifact format for seamless upgrades
+- Migrated from Tauri v1 allowlist to v2 capabilities/permissions system
+- Updated CI/CD workflows for Tauri v2 (env vars, build action, system dependencies)
+- Removed webkit2gtk 4.0 compatibility symlinks (Tauri v2 uses 4.1 natively)
+
+### Fixed
+- Fixed auto-updater "Could not fetch a valid release JSON" error
+- Preserved localStorage data for existing Windows users during upgrade (`useHttpsScheme: true`)
+
 ## [3.1.1] - 2026-02-22
 
 ### Fixed

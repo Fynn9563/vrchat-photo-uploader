@@ -1,7 +1,7 @@
 use crate::commands::FailedUpload;
 use crate::errors::{safe_progress_read, safe_progress_update, ProgressState};
 use std::path::Path;
-use tauri::Manager;
+use tauri::Emitter;
 use tokio::time::Instant;
 
 /// Check if session is cancelled
@@ -64,7 +64,7 @@ pub fn update_progress_current(
         |progress| {
             progress.current_image = Some(file_path.clone());
             progress.current_progress = 0.0;
-            log::debug!("Progress: Currently uploading {}", file_path);
+            log::debug!("Progress: Currently uploading {file_path}");
         },
     );
 }
@@ -83,7 +83,7 @@ pub fn update_progress_current_with_phase(
             .unwrap_or_default()
             .to_string_lossy();
 
-        progress.current_image = Some(format!("{} - {}", phase, filename));
+        progress.current_image = Some(format!("{phase} - {filename}"));
         progress.current_progress = progress_percent;
         log::debug!(
             "Progress: {} {} ({}%)",
@@ -174,16 +174,13 @@ pub fn update_progress_group_failure(
 
             progress.failed_uploads.push(FailedUpload {
                 file_path: file_path.clone(),
-                error: format!("[Group: {}] {}", group_id, error),
+                error: format!("[Group: {group_id}] {error}"),
                 retry_count: 0,
                 is_retryable,
             });
 
             log::warn!(
-                "Progress: Group failure for {} in group {} - {}",
-                file_path,
-                group_id,
-                error
+                "Progress: Group failure for {file_path} in group {group_id} - {error}"
             );
         },
     );
@@ -225,11 +222,7 @@ pub fn update_time_estimate(
                 let minutes = estimated_seconds / 60;
                 let seconds = estimated_seconds % 60;
                 log::debug!(
-                    "ETA updated: {}m {}s (rate: {:.2} images/sec, remaining: {})",
-                    minutes,
-                    seconds,
-                    rate,
-                    remaining
+                    "ETA updated: {minutes}m {seconds}s (rate: {rate:.2} images/sec, remaining: {remaining})"
                 );
             }
         },
@@ -284,6 +277,6 @@ pub fn emit_session_progress(
                 serde_json::Value::String(session_id.to_string()),
             );
         }
-        app_handle.emit_all("upload-progress", payload).ok();
+        app_handle.emit("upload-progress", payload).ok();
     }
 }

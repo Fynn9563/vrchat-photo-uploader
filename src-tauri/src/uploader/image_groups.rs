@@ -35,7 +35,7 @@ pub async fn group_images_by_metadata(
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::sync::Mutex;
-    use tauri::Manager;
+    use tauri::Emitter;
     use tokio::sync::Semaphore;
 
     let max_concurrent = std::thread::available_parallelism()
@@ -59,7 +59,7 @@ pub async fn group_images_by_metadata(
 
         handles.push(tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
-            log::debug!("Extracting metadata for: {}", file_path);
+            log::debug!("Extracting metadata for: {file_path}");
 
             let metadata = image_processor::extract_metadata(&file_path)
                 .await
@@ -74,7 +74,7 @@ pub async fn group_images_by_metadata(
             let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
             // Emit batch updates to avoid flooding event loop for 5000 items
             if done % 5 == 0 || done == total_files {
-                app_handle.emit_all("upload-progress", serde_json::json!({
+                app_handle.emit("upload-progress", serde_json::json!({
                     "session_id": session_id,
                     "total_images": total_files,
                     "completed": 0, // Uploads completed
@@ -89,7 +89,7 @@ pub async fn group_images_by_metadata(
     // Wait for all
     for handle in handles {
         if let Err(e) = handle.await {
-            log::error!("Metadata extraction task failed: {}", e);
+            log::error!("Metadata extraction task failed: {e}");
         }
     }
 
@@ -121,9 +121,7 @@ pub async fn group_images_by_metadata(
             // If merging is enabled and we have a previous group, use it!
             let key = last_valid_group_key.as_ref().unwrap().clone();
             log::info!(
-                "Merging no-metadata file {} into previous group: {}",
-                file_path,
-                key
+                "Merging no-metadata file {file_path} into previous group: {key}"
             );
             key
         } else if no_time_limit {
@@ -131,7 +129,7 @@ pub async fn group_images_by_metadata(
         } else if let Some(ts) = timestamp {
             format!("unknown_{}", ts / time_window_seconds)
         } else {
-            format!("unknown_{}", file_path)
+            format!("unknown_{file_path}")
         };
 
         image_data.push((file_path, metadata, timestamp, group_key));
@@ -267,7 +265,7 @@ fn create_metadata_key(
     };
 
     if no_time_limit {
-        format!("{}_all", world_part)
+        format!("{world_part}_all")
     } else {
         format!(
             "{}_t{}",
@@ -337,7 +335,7 @@ fn create_message_content_with_players(
     let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
 
     if !all_worlds.is_empty() {
-        content.push_str(&format!("📸 {} taken at ", photo_word));
+        content.push_str(&format!("📸 {photo_word} taken at "));
 
         let world_parts: Vec<String> = all_worlds
             .iter()
@@ -354,7 +352,7 @@ fn create_message_content_with_players(
         content.push_str(&world_parts.join(", "));
 
         if let Some(ts) = timestamp {
-            content.push_str(&format!(" at <t:{}:f>", ts));
+            content.push_str(&format!(" at <t:{ts}:f>"));
         }
 
         // Add players if requested
@@ -371,7 +369,7 @@ fn create_message_content_with_players(
                 let mut players_added = 1;
                 for player in all_players.iter().skip(1) {
                     let player_str = format!("**{}**", player.display_name);
-                    let addition = format!(", {}", player_str);
+                    let addition = format!(", {player_str}");
 
                     if content.len() + addition.len() > MAX_LENGTH {
                         // Can't fit more players, save remaining
@@ -398,9 +396,9 @@ fn create_message_content_with_players(
             }
         }
     } else {
-        content.push_str(&format!("📸 {}", photo_word));
+        content.push_str(&format!("📸 {photo_word}"));
         if let Some(ts) = timestamp {
-            content.push_str(&format!(" taken at <t:{}:f>", ts));
+            content.push_str(&format!(" taken at <t:{ts}:f>"));
         }
     }
 
@@ -428,7 +426,7 @@ fn create_overflow_player_messages(
     for player in remaining_players.iter() {
         let player_str = format!("**{}**", player.display_name);
         let separator = if current.len() > prefix_len { ", " } else { "" };
-        let addition = format!("{}{}", separator, player_str);
+        let addition = format!("{separator}{player_str}");
 
         if current.len() > prefix_len && current.len() + addition.len() > MAX_LENGTH {
             // Current message is full, end with comma and start new one
@@ -464,7 +462,7 @@ fn create_thread_title(all_worlds: &[WorldInfo], image_count: usize) -> String {
             title
         }
     } else {
-        format!("📸 {}", photo_word)
+        format!("📸 {photo_word}")
     }
 }
 
@@ -476,14 +474,14 @@ pub fn create_worlds_only_message(
 ) -> String {
     let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
     if all_worlds.is_empty() {
-        let mut content = format!("📸 {}", photo_word);
+        let mut content = format!("📸 {photo_word}");
         if let Some(ts) = timestamp {
-            content.push_str(&format!(" taken at <t:{}:f>", ts));
+            content.push_str(&format!(" taken at <t:{ts}:f>"));
         }
         return content;
     }
 
-    let mut content = format!("📸 {} taken at ", photo_word);
+    let mut content = format!("📸 {photo_word} taken at ");
 
     let world_parts: Vec<String> = all_worlds
         .iter()
@@ -500,7 +498,7 @@ pub fn create_worlds_only_message(
     content.push_str(&world_parts.join(", "));
 
     if let Some(ts) = timestamp {
-        content.push_str(&format!(" at <t:{}:f>", ts));
+        content.push_str(&format!(" at <t:{ts}:f>"));
     }
 
     content
@@ -516,7 +514,7 @@ pub fn create_compact_world_messages(
     let photo_word = if image_count == 1 { "Photo" } else { "Photos" };
 
     if all_worlds.is_empty() {
-        return (format!("📸 {}", photo_word), vec![]);
+        return (format!("📸 {photo_word}"), vec![]);
     }
 
     // Build summary message with world names (bullet list)
@@ -533,7 +531,7 @@ pub fn create_compact_world_messages(
     for world in all_worlds.iter() {
         let vrchat_link = format!("https://vrchat.com/home/launch?worldId={}", world.id);
         let vrcx_link = format!("https://vrcx.azurewebsites.net/world/{}", world.id);
-        let link_line = format!("• [VRChat](<{}>) | [VRCX](<{}>)\n", vrchat_link, vrcx_link);
+        let link_line = format!("• [VRChat](<{vrchat_link}>) | [VRCX](<{vrcx_link}>)\n");
 
         if current_links.len() + link_line.len() > MAX_LENGTH {
             // Current message full, save and start new one
@@ -573,7 +571,7 @@ pub fn create_split_player_messages(all_players: &[PlayerInfo]) -> Vec<String> {
     for player in all_players.iter() {
         let player_str = format!("**{}**", player.display_name);
         let separator = if current.len() > prefix_len { ", " } else { "" };
-        let addition = format!("{}{}", separator, player_str);
+        let addition = format!("{separator}{player_str}");
 
         if current.len() > prefix_len && current.len() + addition.len() > MAX_LENGTH {
             // Current message is full, end with comma and start new one
@@ -599,4 +597,361 @@ pub fn create_split_player_messages(all_players: &[PlayerInfo]) -> Vec<String> {
         all_players.len()
     );
     messages
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::{ImageMetadata, PlayerInfo, WorldInfo};
+
+    fn make_world(name: &str, id: &str) -> WorldInfo {
+        WorldInfo {
+            name: name.to_string(),
+            id: id.to_string(),
+            instance_id: String::new(),
+        }
+    }
+
+    fn make_player(name: &str) -> PlayerInfo {
+        PlayerInfo {
+            display_name: name.to_string(),
+            id: format!("usr_{}", name.to_lowercase().replace(' ', "_")),
+        }
+    }
+
+    fn make_metadata(world_name: &str, world_id: &str) -> ImageMetadata {
+        ImageMetadata {
+            author: None,
+            world: Some(make_world(world_name, world_id)),
+            players: vec![],
+        }
+    }
+
+    // --- create_discord_payload tests ---
+
+    #[test]
+    fn test_payload_first_message_with_world() {
+        let worlds = vec![make_world("Test World", "wrld_123")];
+        let players = vec![];
+        let (payload, overflow) = create_discord_payload(
+            &worlds, &players, Some(1705312200), true, 0, false, None, false, 3,
+        );
+        let content = payload.get("content").unwrap();
+        assert!(content.contains("Photos taken at"));
+        assert!(content.contains("Test World"));
+        assert!(content.contains("<t:1705312200:f>"));
+        assert!(overflow.is_empty());
+    }
+
+    #[test]
+    fn test_payload_first_message_no_world() {
+        let (payload, _) = create_discord_payload(
+            &[], &[], Some(1705312200), true, 0, false, None, false, 5,
+        );
+        let content = payload.get("content").unwrap();
+        assert!(content.contains("Photos"));
+        assert!(content.contains("<t:1705312200:f>"));
+    }
+
+    #[test]
+    fn test_payload_continuation_chunk_empty() {
+        let worlds = vec![make_world("W", "wrld_1")];
+        let (payload, _) = create_discord_payload(
+            &worlds, &[], None, false, 1, false, None, false, 2,
+        );
+        // Continuation chunks should have no content
+        assert!(payload.get("content").is_none());
+    }
+
+    #[test]
+    fn test_payload_forum_adds_thread_name() {
+        let worlds = vec![make_world("My World", "wrld_456")];
+        let (payload, _) = create_discord_payload(
+            &worlds, &[], None, true, 0, true, None, false, 2,
+        );
+        assert!(payload.contains_key("thread_name"));
+        let thread_name = payload.get("thread_name").unwrap();
+        assert!(thread_name.contains("My World"));
+    }
+
+    #[test]
+    fn test_payload_singular_photo() {
+        let (payload, _) = create_discord_payload(
+            &[], &[], None, true, 0, false, None, false, 1,
+        );
+        let content = payload.get("content").unwrap();
+        assert!(content.contains("Photo"));
+        assert!(!content.contains("Photos"));
+    }
+
+    #[test]
+    fn test_payload_plural_photos() {
+        let (payload, _) = create_discord_payload(
+            &[], &[], None, true, 0, false, None, false, 2,
+        );
+        let content = payload.get("content").unwrap();
+        assert!(content.contains("Photos"));
+    }
+
+    #[test]
+    fn test_payload_with_players() {
+        let worlds = vec![make_world("W", "wrld_1")];
+        let players = vec![make_player("Alice"), make_player("Bob")];
+        let (payload, overflow) = create_discord_payload(
+            &worlds, &players, None, true, 0, false, None, true, 2,
+        );
+        let content = payload.get("content").unwrap();
+        assert!(content.contains("Alice"));
+        assert!(content.contains("Bob"));
+        assert!(overflow.is_empty());
+    }
+
+    #[test]
+    fn test_payload_without_player_names_flag() {
+        let worlds = vec![make_world("W", "wrld_1")];
+        let players = vec![make_player("Alice")];
+        let (payload, _) = create_discord_payload(
+            &worlds, &players, None, true, 0, false, None, false, 2,
+        );
+        let content = payload.get("content").unwrap();
+        assert!(!content.contains("Alice"));
+    }
+
+    // --- create_metadata_key tests ---
+
+    #[test]
+    fn test_metadata_key_with_world_and_time() {
+        let meta = make_metadata("W", "wrld_abc");
+        let key = create_metadata_key(&meta, Some(3600), 3600, false, true);
+        assert_eq!(key, "wrld_abc_t1");
+    }
+
+    #[test]
+    fn test_metadata_key_no_time_limit() {
+        let meta = make_metadata("W", "wrld_abc");
+        let key = create_metadata_key(&meta, Some(3600), 3600, true, true);
+        assert_eq!(key, "wrld_abc_all");
+    }
+
+    #[test]
+    fn test_metadata_key_no_world_grouping() {
+        let meta = make_metadata("W", "wrld_abc");
+        let key = create_metadata_key(&meta, Some(3600), 3600, false, false);
+        assert_eq!(key, "any_world_t1");
+    }
+
+    #[test]
+    fn test_metadata_key_no_world_no_time() {
+        let meta = make_metadata("W", "wrld_abc");
+        let key = create_metadata_key(&meta, Some(3600), 3600, true, false);
+        assert_eq!(key, "any_world_all");
+    }
+
+    #[test]
+    fn test_metadata_key_no_world_in_metadata() {
+        let mut meta = make_metadata("W", "wrld_abc");
+        meta.world = None;
+        let key = create_metadata_key(&meta, Some(3600), 3600, false, true);
+        assert_eq!(key, "unknown_t1");
+    }
+
+    // --- create_thread_title tests ---
+
+    #[test]
+    fn test_thread_title_single_world() {
+        let worlds = vec![make_world("Cool Place", "wrld_1")];
+        let title = create_thread_title(&worlds, 5);
+        assert!(title.contains("Cool Place"));
+        assert!(title.contains("Photos"));
+    }
+
+    #[test]
+    fn test_thread_title_multiple_worlds() {
+        let worlds = vec![
+            make_world("World A", "wrld_a"),
+            make_world("World B", "wrld_b"),
+        ];
+        let title = create_thread_title(&worlds, 3);
+        assert!(title.contains("World A"));
+        assert!(title.contains("World B"));
+    }
+
+    #[test]
+    fn test_thread_title_truncated_at_100() {
+        let worlds = vec![
+            make_world("A Very Long World Name That Takes Up Space", "wrld_1"),
+            make_world("Another Long World Name To Push Over Limit", "wrld_2"),
+        ];
+        let title = create_thread_title(&worlds, 5);
+        assert!(title.len() <= 100, "Title should be at most 100 chars: len={}", title.len());
+    }
+
+    #[test]
+    fn test_thread_title_no_worlds() {
+        let title = create_thread_title(&[], 3);
+        assert!(title.contains("Photos"));
+    }
+
+    #[test]
+    fn test_thread_title_single_photo() {
+        let title = create_thread_title(&[], 1);
+        assert!(title.contains("Photo"));
+        assert!(!title.contains("Photos"));
+    }
+
+    // --- create_message_content_with_players tests ---
+
+    #[test]
+    fn test_content_with_players_fits() {
+        let worlds = vec![make_world("W", "wrld_1")];
+        let players = vec![make_player("Alice"), make_player("Bob")];
+        let (content, remaining, had_players) =
+            create_message_content_with_players(&worlds, &players, None, true, 2);
+        assert!(content.contains("Alice"));
+        assert!(content.contains("Bob"));
+        assert!(remaining.is_empty());
+        assert!(had_players);
+    }
+
+    #[test]
+    fn test_content_no_players_when_disabled() {
+        let worlds = vec![make_world("W", "wrld_1")];
+        let players = vec![make_player("Alice")];
+        let (content, remaining, had_players) =
+            create_message_content_with_players(&worlds, &players, None, false, 2);
+        assert!(!content.contains("Alice"));
+        assert!(remaining.is_empty());
+        assert!(!had_players);
+    }
+
+    #[test]
+    fn test_content_overflows_players() {
+        let worlds = vec![make_world("W", "wrld_1")];
+        // Create enough players to overflow 1900 chars
+        let players: Vec<PlayerInfo> = (0..200)
+            .map(|i| make_player(&format!("Player_{i:04}")))
+            .collect();
+        let (content, remaining, had_players) =
+            create_message_content_with_players(&worlds, &players, None, true, 5);
+        assert!(content.len() <= 1901, "Content too long: {}", content.len());
+        assert!(!remaining.is_empty(), "Should have overflow players");
+        assert!(had_players);
+    }
+
+    // --- create_overflow_player_messages tests ---
+
+    #[test]
+    fn test_overflow_single_message() {
+        let players = vec![make_player("Alice"), make_player("Bob")];
+        let msgs = create_overflow_player_messages(&players, true);
+        assert_eq!(msgs.len(), 1);
+        assert!(msgs[0].contains("Alice"));
+        assert!(msgs[0].contains("Bob"));
+    }
+
+    #[test]
+    fn test_overflow_with_prefix_when_no_main_players() {
+        let players = vec![make_player("Alice")];
+        let msgs = create_overflow_player_messages(&players, false);
+        assert_eq!(msgs.len(), 1);
+        assert!(msgs[0].starts_with("with "));
+    }
+
+    #[test]
+    fn test_overflow_multiple_messages() {
+        // Create enough players to need multiple messages (>1900 chars each)
+        let players: Vec<PlayerInfo> = (0..300)
+            .map(|i| make_player(&format!("LongPlayerName_{i:04}")))
+            .collect();
+        let msgs = create_overflow_player_messages(&players, true);
+        assert!(msgs.len() > 1, "Should need multiple messages for {} players", players.len());
+        for msg in &msgs {
+            assert!(msg.len() <= 1901, "Message too long: {}", msg.len());
+        }
+    }
+
+    // --- create_worlds_only_message tests ---
+
+    #[test]
+    fn test_worlds_only_with_worlds() {
+        let worlds = vec![make_world("Cool Place", "wrld_1")];
+        let msg = create_worlds_only_message(&worlds, Some(12345), 3);
+        assert!(msg.contains("Cool Place"));
+        assert!(msg.contains("<t:12345:f>"));
+    }
+
+    #[test]
+    fn test_worlds_only_no_worlds() {
+        let msg = create_worlds_only_message(&[], Some(12345), 2);
+        assert!(msg.contains("Photos"));
+        assert!(msg.contains("<t:12345:f>"));
+    }
+
+    #[test]
+    fn test_worlds_only_no_timestamp() {
+        let worlds = vec![make_world("W", "wrld_1")];
+        let msg = create_worlds_only_message(&worlds, None, 1);
+        assert!(!msg.contains("<t:"));
+    }
+
+    // --- create_compact_world_messages tests ---
+
+    #[test]
+    fn test_compact_worlds_empty() {
+        let (summary, links) = create_compact_world_messages(&[], 2);
+        assert!(summary.contains("Photos"));
+        assert!(links.is_empty());
+    }
+
+    #[test]
+    fn test_compact_worlds_with_worlds() {
+        let worlds = vec![
+            make_world("World A", "wrld_a"),
+            make_world("World B", "wrld_b"),
+        ];
+        let (summary, links) = create_compact_world_messages(&worlds, 3);
+        assert!(summary.contains("World A"));
+        assert!(summary.contains("World B"));
+        assert!(summary.contains("2 worlds"));
+        assert!(!links.is_empty());
+    }
+
+    // --- create_split_player_messages tests ---
+
+    #[test]
+    fn test_split_players_empty() {
+        let msgs = create_split_player_messages(&[]);
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn test_split_players_single() {
+        let players = vec![make_player("Alice")];
+        let msgs = create_split_player_messages(&players);
+        assert_eq!(msgs.len(), 1);
+        assert!(msgs[0].contains("with "));
+        assert!(msgs[0].contains("Alice"));
+    }
+
+    #[test]
+    fn test_split_players_multiple() {
+        let players = vec![make_player("Alice"), make_player("Bob"), make_player("Charlie")];
+        let msgs = create_split_player_messages(&players);
+        assert_eq!(msgs.len(), 1);
+        assert!(msgs[0].contains("Alice"));
+        assert!(msgs[0].contains("Bob"));
+        assert!(msgs[0].contains("Charlie"));
+    }
+
+    #[test]
+    fn test_split_players_overflow() {
+        let players: Vec<PlayerInfo> = (0..300)
+            .map(|i| make_player(&format!("LongName_{i:04}")))
+            .collect();
+        let msgs = create_split_player_messages(&players);
+        assert!(msgs.len() > 1);
+        for msg in &msgs {
+            assert!(msg.len() <= 1901, "Message too long: {}", msg.len());
+        }
+    }
 }

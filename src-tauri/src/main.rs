@@ -4,8 +4,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{
-    CustomMenuItem, GlobalShortcutManager, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu,
-    SystemTrayMenuItem,
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager,
 };
 
 pub mod background_watcher;
@@ -19,6 +20,9 @@ mod security;
 mod single_instance;
 
 mod uploader;
+
+#[cfg(test)]
+pub mod test_helpers;
 
 use commands::*;
 
@@ -44,152 +48,15 @@ fn main() {
 
     // Migrate configuration if needed
     if let Err(e) = config::migrate_config() {
-        log::error!("Failed to migrate configuration: {}", e);
+        log::error!("Failed to migrate configuration: {e}");
     }
 
-    let tray_menu = SystemTrayMenu::new()
-        .add_item(CustomMenuItem::new("upload_files", "📁 Upload Files"))
-        .add_item(CustomMenuItem::new(
-            "open_vrchat_folder",
-            "📂 Open VRChat Folder",
-        ))
-        .add_native_item(SystemTrayMenuItem::Separator)
-        .add_item(CustomMenuItem::new("show", "🖼️ Show Window"))
-        .add_item(CustomMenuItem::new("settings", "⚙️ Settings"))
-        .add_item(CustomMenuItem::new("metadata_editor", "📝 Metadata Editor"))
-        .add_native_item(SystemTrayMenuItem::Separator)
-        .add_item(CustomMenuItem::new("about", "ℹ️ About"))
-        .add_item(CustomMenuItem::new("check_updates", "🔄 Check for Updates"))
-        .add_native_item(SystemTrayMenuItem::Separator)
-        .add_item(CustomMenuItem::new("quit", "❌ Quit"));
-
-    let system_tray = SystemTray::new()
-        .with_menu(tray_menu)
-        .with_tooltip("VRChat Photo Uploader");
-
     tauri::Builder::default()
-        .system_tray(system_tray)
-        .on_system_tray_event(|app, event| match event {
-            SystemTrayEvent::LeftClick {
-                position: _,
-                size: _,
-                ..
-            } => {
-                let window = app.get_window("main").unwrap();
-                if window.is_visible().unwrap_or(false) {
-                    if let Err(e) = window.hide() {
-                        log::error!("Failed to hide window: {}", e);
-                    }
-                } else {
-                    if let Err(e) = window.show() {
-                        log::error!("Failed to show window: {}", e);
-                    }
-                    if let Err(e) = window.set_focus() {
-                        log::error!("Failed to focus window: {}", e);
-                    }
-                }
-            }
-            SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
-                "upload_files" => {
-                    if let Some(window) = app.get_window("main") {
-                        if let Err(e) = window.emit("upload-files-request", {}) {
-                            log::error!("Failed to emit file upload event: {}", e);
-                        }
-                        if let Err(e) = window.show() {
-                            log::error!("Failed to show window: {}", e);
-                        }
-                        if let Err(e) = window.set_focus() {
-                            log::error!("Failed to focus window: {}", e);
-                        }
-                    }
-                }
-                "open_vrchat_folder" => {
-                    if let Some(window) = app.get_window("main") {
-                        if let Err(e) = window.emit("open-vrchat-folder-request", {}) {
-                            log::error!("Failed to emit open VRChat folder event: {}", e);
-                        }
-                        // Window shown by frontend if needed
-                    }
-                }
-                "show" => {
-                    let window = app.get_window("main").unwrap();
-                    if let Err(e) = window.show() {
-                        log::error!("Failed to show window: {}", e);
-                    }
-                    if let Err(e) = window.set_focus() {
-                        log::error!("Failed to focus window: {}", e);
-                    }
-                }
-                "settings" => {
-                    if let Some(window) = app.get_window("main") {
-                        if let Err(e) = window.emit("show-settings", {}) {
-                            log::error!("Failed to emit settings event: {}", e);
-                        }
-                        if let Err(e) = window.show() {
-                            log::error!("Failed to show window: {}", e);
-                        }
-                        if let Err(e) = window.set_focus() {
-                            log::error!("Failed to focus window: {}", e);
-                        }
-                    }
-                }
-                "about" => {
-                    if let Some(window) = app.get_window("main") {
-                        if let Err(e) = window.emit("show-about", {}) {
-                            log::error!("Failed to emit about event: {}", e);
-                        }
-                        if let Err(e) = window.show() {
-                            log::error!("Failed to show window: {}", e);
-                        }
-                        if let Err(e) = window.set_focus() {
-                            log::error!("Failed to focus window: {}", e);
-                        }
-                    }
-                }
-                "metadata_editor" => {
-                    if let Some(window) = app.get_window("main") {
-                        if let Err(e) = window.emit("show-metadata-editor", {}) {
-                            log::error!("Failed to emit metadata editor event: {}", e);
-                        }
-                        if let Err(e) = window.show() {
-                            log::error!("Failed to show window: {}", e);
-                        }
-                        if let Err(e) = window.set_focus() {
-                            log::error!("Failed to focus window: {}", e);
-                        }
-                    }
-                }
-                "check_updates" => {
-                    log::info!("Check for updates requested from tray");
-                    let app_handle = app.app_handle();
-                    tauri::async_runtime::spawn(async move {
-                        if let Err(e) = commands::check_for_updates(app_handle).await {
-                            log::error!("Failed to check for updates: {}", e);
-                        }
-                    });
-                }
-                "quit" => {
-                    log::info!("Application quit requested from tray");
-                    single_instance::cleanup_lock_file();
-                    app.exit(0);
-                }
-                _ => {}
-            },
-            SystemTrayEvent::DoubleClick {
-                position: _,
-                size: _,
-                ..
-            } => {
-                let window = app.get_window("main").unwrap();
-                if let Err(e) = window.show() {
-                    log::error!("Failed to show window: {}", e);
-                }
-                if let Err(e) = window.set_focus() {
-                    log::error!("Failed to focus window: {}", e);
-                }
-            }
-            _ => {}
-        })
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_os::init())
         .manage(ProgressState::new(Mutex::new(HashMap::new())))
         .manage(Mutex::new(background_watcher::BackgroundWatcher::new()))
         .invoke_handler(tauri::generate_handler![
@@ -225,8 +92,252 @@ fn main() {
         ])
         .setup(|app| {
             log::info!("Setting up application...");
+
+            // Register updater plugin
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            // Register global shortcut plugin
+            {
+                use tauri_plugin_global_shortcut::{Code, Modifiers, ShortcutState};
+                let shortcut_app_handle = app.handle().clone();
+                app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_handler(move |_app, shortcut, event| {
+                            if event.state == ShortcutState::Pressed
+                                && shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyU)
+                            {
+                                log::info!("Global shortcut triggered: Upload files");
+                                if let Some(window) =
+                                    shortcut_app_handle.get_webview_window("main")
+                                {
+                                    if let Err(e) = window.emit("global-shortcut-upload", ()) {
+                                        log::error!(
+                                            "Failed to emit global shortcut event: {e}"
+                                        );
+                                    } else {
+                                        log::info!("Global shortcut event emitted successfully");
+                                    }
+                                    if let Err(e) = window.show() {
+                                        log::error!(
+                                            "Failed to show window from global shortcut: {e}"
+                                        );
+                                    }
+                                    if let Err(e) = window.set_focus() {
+                                        log::error!(
+                                            "Failed to focus window from global shortcut: {e}"
+                                        );
+                                    }
+                                }
+                            }
+                        })
+                        .build(),
+                )?;
+
+                // Register the shortcut after plugin is initialized
+                use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                app.global_shortcut().on_shortcut(
+                    tauri_plugin_global_shortcut::Shortcut::new(
+                        Some(Modifiers::CONTROL | Modifiers::SHIFT),
+                        Code::KeyU,
+                    ),
+                    |_, _, _| {
+                        // Handled by the handler above
+                    },
+                )?;
+            }
+
+            // Build system tray menu
+            let upload_files =
+                MenuItem::with_id(app, "upload_files", "📁 Upload Files", true, None::<&str>)?;
+            let open_vrchat = MenuItem::with_id(
+                app,
+                "open_vrchat_folder",
+                "📂 Open VRChat Folder",
+                true,
+                None::<&str>,
+            )?;
+            let sep1 = PredefinedMenuItem::separator(app)?;
+            let show =
+                MenuItem::with_id(app, "show", "🖼️ Show Window", true, None::<&str>)?;
+            let settings =
+                MenuItem::with_id(app, "settings", "⚙️ Settings", true, None::<&str>)?;
+            let metadata_editor = MenuItem::with_id(
+                app,
+                "metadata_editor",
+                "📝 Metadata Editor",
+                true,
+                None::<&str>,
+            )?;
+            let sep2 = PredefinedMenuItem::separator(app)?;
+            let about = MenuItem::with_id(app, "about", "ℹ️ About", true, None::<&str>)?;
+            let check_updates = MenuItem::with_id(
+                app,
+                "check_updates",
+                "🔄 Check for Updates",
+                true,
+                None::<&str>,
+            )?;
+            let sep3 = PredefinedMenuItem::separator(app)?;
+            let quit = MenuItem::with_id(app, "quit", "❌ Quit", true, None::<&str>)?;
+
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &upload_files,
+                    &open_vrchat,
+                    &sep1,
+                    &show,
+                    &settings,
+                    &metadata_editor,
+                    &sep2,
+                    &about,
+                    &check_updates,
+                    &sep3,
+                    &quit,
+                ],
+            )?;
+
+            // Build tray icon
+            let _tray = TrayIconBuilder::new()
+                .menu(&menu)
+                .tooltip("VRChat Photo Uploader")
+                .icon(app.default_window_icon().unwrap().clone())
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "upload_files" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                if let Err(e) = window.emit("upload-files-request", ()) {
+                                    log::error!("Failed to emit file upload event: {e}");
+                                }
+                                if let Err(e) = window.show() {
+                                    log::error!("Failed to show window: {e}");
+                                }
+                                if let Err(e) = window.set_focus() {
+                                    log::error!("Failed to focus window: {e}");
+                                }
+                            }
+                        }
+                        "open_vrchat_folder" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                if let Err(e) = window.emit("open-vrchat-folder-request", ()) {
+                                    log::error!(
+                                        "Failed to emit open VRChat folder event: {e}"
+                                    );
+                                }
+                            }
+                        }
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                if let Err(e) = window.show() {
+                                    log::error!("Failed to show window: {e}");
+                                }
+                                if let Err(e) = window.set_focus() {
+                                    log::error!("Failed to focus window: {e}");
+                                }
+                            }
+                        }
+                        "settings" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                if let Err(e) = window.emit("show-settings", ()) {
+                                    log::error!("Failed to emit settings event: {e}");
+                                }
+                                if let Err(e) = window.show() {
+                                    log::error!("Failed to show window: {e}");
+                                }
+                                if let Err(e) = window.set_focus() {
+                                    log::error!("Failed to focus window: {e}");
+                                }
+                            }
+                        }
+                        "about" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                if let Err(e) = window.emit("show-about", ()) {
+                                    log::error!("Failed to emit about event: {e}");
+                                }
+                                if let Err(e) = window.show() {
+                                    log::error!("Failed to show window: {e}");
+                                }
+                                if let Err(e) = window.set_focus() {
+                                    log::error!("Failed to focus window: {e}");
+                                }
+                            }
+                        }
+                        "metadata_editor" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                if let Err(e) = window.emit("show-metadata-editor", ()) {
+                                    log::error!("Failed to emit metadata editor event: {e}");
+                                }
+                                if let Err(e) = window.show() {
+                                    log::error!("Failed to show window: {e}");
+                                }
+                                if let Err(e) = window.set_focus() {
+                                    log::error!("Failed to focus window: {e}");
+                                }
+                            }
+                        }
+                        "check_updates" => {
+                            log::info!("Check for updates requested from tray");
+                            let app_handle = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(e) = commands::check_for_updates(app_handle).await {
+                                    log::error!("Failed to check for updates: {e}");
+                                }
+                            });
+                        }
+                        "quit" => {
+                            log::info!("Application quit requested from tray");
+                            single_instance::cleanup_lock_file();
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    match event {
+                        TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } => {
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("main") {
+                                if window.is_visible().unwrap_or(false) {
+                                    if let Err(e) = window.hide() {
+                                        log::error!("Failed to hide window: {e}");
+                                    }
+                                } else {
+                                    if let Err(e) = window.show() {
+                                        log::error!("Failed to show window: {e}");
+                                    }
+                                    if let Err(e) = window.set_focus() {
+                                        log::error!("Failed to focus window: {e}");
+                                    }
+                                }
+                            }
+                        }
+                        TrayIconEvent::DoubleClick {
+                            button: MouseButton::Left,
+                            ..
+                        } => {
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("main") {
+                                if let Err(e) = window.show() {
+                                    log::error!("Failed to show window: {e}");
+                                }
+                                if let Err(e) = window.set_focus() {
+                                    log::error!("Failed to focus window: {e}");
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                })
+                .build(app)?;
+
             // Start the signal checker for single instance
-            single_instance::start_signal_checker(app.handle());
+            single_instance::start_signal_checker(app.handle().clone());
 
             // Block setup until database is initialized
             tauri::async_runtime::block_on(async {
@@ -235,53 +346,22 @@ fn main() {
                         log::info!("Database initialized successfully");
                     }
                     Err(e) => {
-                        log::error!("Failed to initialize database: {}", e);
-                        // Could still continue with app startup
+                        log::error!("Failed to initialize database: {e}");
                     }
                 }
             });
 
-            // Set up global shortcuts for screenshot upload
-            let mut shortcuts = app.global_shortcut_manager();
-
-            // Get the app handle for emitting events
-            let shortcut_app_handle = app.handle();
-
-            // Register global shortcuts
-            if let Err(e) = shortcuts.register("CommandOrControl+Shift+U", move || {
-                log::info!("Global shortcut triggered: Upload files");
-
-                // Emit event to frontend to trigger file dialog
-                if let Some(window) = shortcut_app_handle.get_window("main") {
-                    if let Err(e) = window.emit("global-shortcut-upload", {}) {
-                        log::error!("Failed to emit global shortcut event: {}", e);
-                    } else {
-                        log::info!("Global shortcut event emitted successfully");
-                    }
-
-                    // Also show and focus the window
-                    if let Err(e) = window.show() {
-                        log::error!("Failed to show window from global shortcut: {}", e);
-                    }
-                    if let Err(e) = window.set_focus() {
-                        log::error!("Failed to focus window from global shortcut: {}", e);
-                    }
-                }
-            }) {
-                log::warn!("Failed to register global shortcut Ctrl+Shift+U: {}", e);
-            }
-
             // Set window title with version
-            if let Some(window) = app.get_window("main") {
+            if let Some(window) = app.get_webview_window("main") {
                 let version = app.package_info().version.to_string();
-                let title = format!("VRChat Photo Uploader v{}", version);
+                let title = format!("VRChat Photo Uploader v{version}");
                 if let Err(e) = window.set_title(&title) {
-                    log::warn!("Failed to set window title: {}", e);
+                    log::warn!("Failed to set window title: {e}");
                 }
             }
 
             // Schedule auto-cleanup task - but wait for database to be ready
-            let cleanup_app_handle = app.handle();
+            let cleanup_app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 // Wait a bit for database to initialize
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -295,15 +375,15 @@ fn main() {
                     // Check if database is initialized before cleanup
                     if database::DB_POOL.get().is_some() {
                         if let Err(e) = config::auto_cleanup().await {
-                            log::error!("Auto-cleanup failed: {}", e);
+                            log::error!("Auto-cleanup failed: {e}");
                         } else {
                             log::info!("Auto-cleanup completed successfully");
                         }
 
                         // Emit cleanup completion event
-                        if let Some(window) = cleanup_app_handle.get_window("main") {
-                            if let Err(e) = window.emit("auto-cleanup-completed", {}) {
-                                log::error!("Failed to emit cleanup event: {}", e);
+                        if let Some(window) = cleanup_app_handle.get_webview_window("main") {
+                            if let Err(e) = window.emit("auto-cleanup-completed", ()) {
+                                log::error!("Failed to emit cleanup event: {e}");
                             }
                         }
                     } else {
@@ -315,24 +395,22 @@ fn main() {
             // Initialize security cleanup on startup
             tauri::async_runtime::spawn(async {
                 if let Err(e) = security::FileSystemGuard::cleanup_temp_files() {
-                    log::warn!("Failed to cleanup temp files: {}", e);
+                    log::warn!("Failed to cleanup temp files: {e}");
                 }
             });
 
             // Initialize Background Watcher
-            let watcher_app_handle = app.handle();
+            let watcher_app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                // Determine VRChat path (frontend or logic? For now rely on Config being populated)
                 if let Ok(config) = config::load_config() {
                     if config.enable_auto_upload {
                         if let Some(path) = config.vrchat_path {
-                            // Chain state access to avoid lifetime issues with local variable
                             if let Ok(mut watcher) = watcher_app_handle
                                 .state::<Mutex<background_watcher::BackgroundWatcher>>()
                                 .lock()
                             {
                                 if let Err(e) = watcher.start(watcher_app_handle.clone(), path) {
-                                    log::error!("Failed to start background watcher: {}", e);
+                                    log::error!("Failed to start background watcher: {e}");
                                 }
                             }
                         }
@@ -343,22 +421,16 @@ fn main() {
             log::info!("Application setup completed successfully");
             Ok(())
         })
-        .on_window_event(|event| {
-            match event.event() {
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    // Hide to tray instead of closing
-                    event.window().hide().unwrap();
-                    api.prevent_close();
-                }
-                _ => {}
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Hide to tray instead of closing
+                let _ = window.hide();
+                api.prevent_close();
             }
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| match event {
-            tauri::RunEvent::ExitRequested { .. } => {
-                single_instance::cleanup_lock_file();
-            }
-            _ => {}
+        .run(|_app_handle, event| if let tauri::RunEvent::ExitRequested { .. } = event {
+            single_instance::cleanup_lock_file();
         });
 }

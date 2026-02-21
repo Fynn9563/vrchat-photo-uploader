@@ -9,4 +9,5 @@ pub mod image_processor;
 pub mod metadata_editor;
 pub mod security;
 pub mod single_instance;
+pub mod test_helpers;
 pub mod uploader;

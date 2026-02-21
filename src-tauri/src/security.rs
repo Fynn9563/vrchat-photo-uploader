@@ -166,7 +166,7 @@ impl FileSystemGuard {
 
         // Add short UUID suffix for uniqueness while keeping original name
         let short_id = &uuid::Uuid::new_v4().to_string()[..8];
-        let temp_path = temp_dir.join(format!("{}_{}.{}", original_stem, short_id, extension));
+        let temp_path = temp_dir.join(format!("{original_stem}_{short_id}.{extension}"));
 
         Ok(temp_path)
     }
@@ -205,8 +205,7 @@ mod tests {
         for name in valid_names {
             assert!(
                 InputValidator::validate_webhook_name(name).is_ok(),
-                "Valid name '{}' should pass validation",
-                name
+                "Valid name '{name}' should pass validation"
             );
         }
     }
@@ -229,9 +228,7 @@ mod tests {
         for (name, reason) in invalid_names {
             assert!(
                 InputValidator::validate_webhook_name(name).is_err(),
-                "Invalid name '{}' should fail validation ({})",
-                name,
-                reason
+                "Invalid name '{name}' should fail validation ({reason})"
             );
         }
     }
@@ -246,8 +243,7 @@ mod tests {
         for url in valid_urls {
             assert!(
                 InputValidator::validate_webhook_url(url).is_ok(),
-                "Valid URL '{}' should pass validation",
-                url
+                "Valid URL '{url}' should pass validation"
             );
         }
     }
@@ -268,9 +264,7 @@ mod tests {
         for (url, reason) in invalid_urls {
             assert!(
                 InputValidator::validate_webhook_url(url).is_err(),
-                "Invalid URL '{}' should fail validation ({})",
-                url,
-                reason
+                "Invalid URL '{url}' should fail validation ({reason})"
             );
         }
     }
@@ -280,13 +274,11 @@ mod tests {
         for i in 1..=10 {
             assert!(
                 InputValidator::validate_upload_settings(i, true).is_ok(),
-                "Max images {} should be valid",
-                i
+                "Max images {i} should be valid"
             );
             assert!(
                 InputValidator::validate_upload_settings(i, false).is_ok(),
-                "Max images {} should be valid",
-                i
+                "Max images {i} should be valid"
             );
         }
     }
@@ -316,8 +308,7 @@ mod tests {
             let result = InputValidator::sanitize_filename(input);
             assert_eq!(
                 result, expected,
-                "Sanitizing '{}' should produce '{}'",
-                input, expected
+                "Sanitizing '{input}' should produce '{expected}'"
             );
         }
     }
@@ -344,9 +335,7 @@ mod tests {
         for (path, reason) in invalid_paths {
             assert!(
                 InputValidator::validate_file_path(path).is_err(),
-                "Invalid path '{}' should fail validation ({})",
-                path,
-                reason
+                "Invalid path '{path}' should fail validation ({reason})"
             );
         }
     }

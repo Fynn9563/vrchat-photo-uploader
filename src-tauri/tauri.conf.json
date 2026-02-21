@@ -2,105 +2,71 @@
   "build": {
     "beforeDevCommand": "pnpm run dev",
     "beforeBuildCommand": "pnpm run build",
-    "devPath": "http://localhost:1420",
-    "distDir": "../dist",
-    "withGlobalTauri": false
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
   },
-  "package": {
-    "productName": "VRChat Photo Uploader",
-    "version": "3.1.1"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": false,
-      "shell": {
-        "all": false,
-        "open": true
-      },
-      "dialog": {
-        "all": false,
-        "open": true,
-        "save": true,
-        "message": true
-      },
-      "fs": {
-        "all": false,
-        "readFile": true,
-        "writeFile": true,
-        "readDir": true,
-        "copyFile": true,
-        "createDir": true,
-        "removeFile": true,
-        "exists": true,
-        "scope": [
-          "$APPDATA/*",
-          "$TEMP/*",
-          "$PICTURE/*",
-          "$DOCUMENT/*"
-        ]
-      },
-      "path": {
-        "all": true
-      },
-      "os": {
-        "all": true
-      },
-      "globalShortcut": {
-        "all": true
-      },
-      "notification": {
-        "all": true
-      },
-      "protocol": {
-        "asset": true,
-        "assetScope": [
-          "**"
-        ]
-      }
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "deb",
+      "rpm",
+      "appimage"
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
     },
-    "pattern": {
-      "use": "brownfield"
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [],
+    "externalBin": [],
+    "copyright": "",
+    "category": "Utility",
+    "shortDescription": "Upload VRChat photos to Discord webhooks",
+    "longDescription": "A modern application to efficiently upload VRChat screenshots to Discord webhooks with metadata support and smart grouping features.",
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "",
+      "exceptionDomain": "",
+      "signingIdentity": null,
+      "providerShortName": null,
+      "entitlements": null
     },
-    "bundle": {
-      "active": true,
-      "targets": ["nsis", "deb", "rpm", "appimage"],
-      "identifier": "com.vrchat.photo.uploader",
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ],
-      "resources": [],
-      "externalBin": [],
-      "copyright": "",
-      "category": "Utility",
-      "shortDescription": "Upload VRChat photos to Discord webhooks",
-      "longDescription": "A modern application to efficiently upload VRChat screenshots to Discord webhooks with metadata support and smart grouping features.",
+    "linux": {
       "deb": {
         "depends": []
       },
       "rpm": {
-        "license": "MIT",
         "depends": []
-      },
-      "macOS": {
-        "frameworks": [],
-        "minimumSystemVersion": "",
-        "exceptionDomain": "",
-        "signingIdentity": null,
-        "providerShortName": null,
-        "entitlements": null
-      },
-      "windows": {
-        "certificateThumbprint": null,
-        "digestAlgorithm": "sha256",
-        "timestampUrl": ""
       }
     },
-    "security": {
-      "csp": null
+    "createUpdaterArtifacts": "v1Compatible"
+  },
+  "productName": "VRChat Photo Uploader",
+  "mainBinaryName": "VRChat-Photo-Uploader",
+  "version": "4.0.0",
+  "identifier": "com.vrchat.photo.uploader",
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE1REY1RkU2MjBDNjA1QjkKUldTNUJjWWc1bC9mcGJWUEtPQ2d1Z3haUGowU0NnenRSc3lKaHJTWGI2T0VrMVcwdnhUc3ViTzYK",
+      "endpoints": [
+        "https://github.com/Fynn9563/vrchat-photo-uploader/releases/latest/download/latest.json"
+      ]
+    }
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "trayIcon": {
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true,
+      "menuOnLeftClick": false
     },
     "windows": [
       {
@@ -115,21 +81,21 @@
         "decorations": true,
         "alwaysOnTop": false,
         "skipTaskbar": false,
-        "theme": "Dark"
+        "theme": "Dark",
+        "useHttpsScheme": true
       }
     ],
-    "systemTray": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true,
-      "menuOnLeftClick": false
-    },
-    "updater": {
-      "active": true,
-      "endpoints": [
-        "https://github.com/Fynn9563/vrchat-photo-uploader/releases/latest/download/latest.json"
-      ],
-      "dialog": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE1REY1RkU2MjBDNjA1QjkKUldTNUJjWWc1bC9mcGJWUEtPQ2d1Z3haUGowU0NnenRSc3lKaHJTWGI2T0VrMVcwdnhUc3ViTzYK"
+    "security": {
+      "assetProtocol": {
+        "scope": [
+          "**"
+        ],
+        "enable": true
+      },
+      "csp": null,
+      "pattern": {
+        "use": "brownfield"
+      }
     }
   }
 }

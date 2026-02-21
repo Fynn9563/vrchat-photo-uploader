@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, State};
+use tauri::{Emitter, State};
 
 use crate::security::InputValidator;
 use crate::{config, database, image_processor, metadata_editor, uploader};
@@ -213,7 +213,7 @@ pub async fn retry_failed_group(
         .await;
     });
 
-    log::info!("Started group retry with session: {}", new_session_id);
+    log::info!("Started group retry with session: {new_session_id}");
     Ok(new_session_id)
 }
 
@@ -421,20 +421,20 @@ pub async fn get_image_info_batch(
                     match result {
                         Ok(info) => (file_path, Some(info)),
                         Err(e) => {
-                            log::warn!("Failed to get image info for {}: {}", file_path, e);
+                            log::warn!("Failed to get image info for {file_path}: {e}");
                             (file_path, None)
                         }
                     }
                 })
                 .await
                 .unwrap_or_else(|e| {
-                    log::error!("Task panicked: {}", e);
+                    log::error!("Task panicked: {e}");
                     (String::new(), None)
                 });
 
                 let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
                 app_handle
-                    .emit_all(
+                    .emit(
                         "file-processing-progress",
                         serde_json::json!({
                             "phase": "reading",
@@ -458,7 +458,7 @@ pub async fn get_image_info_batch(
                 }
             }
             Err(e) => {
-                log::error!("Image info task failed: {}", e);
+                log::error!("Image info task failed: {e}");
             }
         }
     }
@@ -512,20 +512,20 @@ pub async fn generate_thumbnails_batch(
                     match result {
                         Ok(thumb_path) => (file_path, Some(thumb_path)),
                         Err(e) => {
-                            log::warn!("Failed to generate thumbnail for {}: {}", file_path, e);
+                            log::warn!("Failed to generate thumbnail for {file_path}: {e}");
                             (file_path, None)
                         }
                     }
                 })
                 .await
                 .unwrap_or_else(|e| {
-                    log::error!("Task panicked: {}", e);
+                    log::error!("Task panicked: {e}");
                     (String::new(), None)
                 });
 
                 let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
                 app_handle
-                    .emit_all(
+                    .emit(
                         "file-processing-progress",
                         serde_json::json!({
                             "phase": "thumbnails",
@@ -549,7 +549,7 @@ pub async fn generate_thumbnails_batch(
                 }
             }
             Err(e) => {
-                log::error!("Thumbnail task failed: {}", e);
+                log::error!("Thumbnail task failed: {e}");
             }
         }
     }
@@ -594,7 +594,7 @@ pub async fn save_app_config(
         if enable_auto {
             if let Some(path) = vrchat_path {
                 if let Err(e) = watcher.start(app_handle, path) {
-                    log::error!("Failed to update background watcher: {}", e);
+                    log::error!("Failed to update background watcher: {e}");
                 }
             } else {
                 watcher.stop();
@@ -641,9 +641,9 @@ pub async fn cleanup_temp_files(temp_filenames: Vec<String>) -> Result<(), Strin
 
         if full_path.exists() {
             if let Err(e) = std::fs::remove_file(&full_path) {
-                log::warn!("Failed to cleanup temp file {}: {}", filename, e);
+                log::warn!("Failed to cleanup temp file {filename}: {e}");
             } else {
-                log::debug!("Cleaned up temp file: {}", filename);
+                log::debug!("Cleaned up temp file: {filename}");
             }
         }
     }
@@ -655,8 +655,7 @@ pub async fn debug_extract_metadata(file_path: String) -> Result<String, String>
     InputValidator::validate_image_file(&file_path)?;
 
     log::info!(
-        "DEBUG: Starting detailed metadata extraction for {}",
-        file_path
+        "DEBUG: Starting detailed metadata extraction for {file_path}"
     );
 
     match image_processor::extract_metadata(&file_path).await {
@@ -672,17 +671,17 @@ pub async fn debug_extract_metadata(file_path: String) -> Result<String, String>
                 metadata.players.len(),
                 metadata.players.first()
             );
-            log::info!("{}", debug_info);
+            log::info!("{debug_info}");
             Ok(debug_info)
         }
         Ok(None) => {
             let debug_info = "No metadata found in file".to_string();
-            log::warn!("{}", debug_info);
+            log::warn!("{debug_info}");
             Ok(debug_info)
         }
         Err(e) => {
-            let debug_info = format!("ERROR: Failed to extract metadata: {}", e);
-            log::error!("{}", debug_info);
+            let debug_info = format!("ERROR: Failed to extract metadata: {e}");
+            log::error!("{debug_info}");
             Err(debug_info)
         }
     }
@@ -725,7 +724,7 @@ pub async fn cancel_upload_session(
     progress_state: State<'_, ProgressState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    log::info!("Attempting to cancel upload session: {}", session_id);
+    log::info!("Attempting to cancel upload session: {session_id}");
 
     let mut progress = progress_state.lock().unwrap();
 
@@ -735,11 +734,11 @@ pub async fn cancel_upload_session(
             session_progress.session_status = "cancelled".to_string();
             session_progress.estimated_time_remaining = Some(0);
 
-            log::info!("Upload session {} marked as cancelled", session_id);
+            log::info!("Upload session {session_id} marked as cancelled");
 
             // Emit events to notify frontend
-            app_handle.emit_all("upload-cancelled", &session_id).ok();
-            app_handle.emit_all("upload-progress", &session_id).ok();
+            app_handle.emit("upload-cancelled", &session_id).ok();
+            app_handle.emit("upload-progress", &session_id).ok();
 
             Ok(())
         } else {
@@ -754,50 +753,61 @@ pub async fn cancel_upload_session(
             ))
         }
     } else {
-        log::warn!("Attempted to cancel non-existent session: {}", session_id);
+        log::warn!("Attempted to cancel non-existent session: {session_id}");
         Err("Session not found".to_string())
     }
 }
 
 #[tauri::command]
 pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+
     log::info!("Checking for updates...");
 
-    match app_handle.updater().check().await {
-        Ok(update_response) => {
-            if update_response.is_update_available() {
-                log::info!("Update available: {}", update_response.latest_version());
+    match app_handle.updater() {
+        Ok(updater) => match updater.check().await {
+            Ok(Some(update)) => {
+                log::info!("Update available: {}", update.version);
 
                 // Emit event to frontend to show update notification
                 app_handle
-                    .emit_all(
+                    .emit(
                         "update-available",
                         serde_json::json!({
-                            "version": update_response.latest_version(),
-                            "body": update_response.body().map_or("", |v| v),
+                            "version": update.version,
+                            "body": update.body.as_deref().unwrap_or(""),
                         }),
                     )
                     .ok();
 
-                // Show update dialog
-                match update_response.download_and_install().await {
+                // Download and install the update
+                match update
+                    .download_and_install(|_chunk_length, _content_length| {}, || {})
+                    .await
+                {
                     Ok(()) => {
-                        log::info!("Update downloaded and installed successfully, restarting...");
+                        log::info!(
+                            "Update downloaded and installed successfully, restarting..."
+                        );
                         app_handle.restart();
-                        Ok(())
                     }
                     Err(e) => {
-                        log::error!("Failed to download and install update: {}", e);
-                        Err(format!("Failed to install update: {}", e))
+                        log::error!("Failed to download and install update: {e}");
+                        Err(format!("Failed to install update: {e}"))
                     }
                 }
-            } else {
+            }
+            Ok(None) => {
                 log::info!("No update available");
                 Ok(())
             }
-        }
+            Err(e) => {
+                log::error!("Failed to check for updates: {e}");
+                Err(e.to_string())
+            }
+        },
         Err(e) => {
-            log::error!("Failed to check for updates: {}", e);
+            log::error!("Failed to initialize updater: {e}");
             Err(e.to_string())
         }
     }

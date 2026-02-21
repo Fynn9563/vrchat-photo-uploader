@@ -1,7 +1,6 @@
 use chrono::Offset;
 use flate2::read::DeflateDecoder;
 use image::codecs::jpeg::JpegEncoder;
-use serde_json;
 use std::fs;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -30,7 +29,7 @@ pub struct MetadataWithSource {
 
 /// Extract metadata with information about its source
 pub async fn extract_metadata_with_source(file_path: &str) -> AppResult<MetadataWithSource> {
-    log::info!("Extracting metadata with source info for: {}", file_path);
+    log::info!("Extracting metadata with source info for: {file_path}");
 
     // Validate input first
     InputValidator::validate_image_file(file_path)?;
@@ -45,7 +44,7 @@ pub async fn extract_metadata_with_source(file_path: &str) -> AppResult<Metadata
         let cleaned_json = metadata_json.trim();
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(cleaned_json) {
             if let Ok(metadata) = parse_vrchat_metadata(json) {
-                log::info!("Found VRCX metadata in {}", file_path);
+                log::info!("Found VRCX metadata in {file_path}");
                 return Ok(MetadataWithSource {
                     metadata: Some(metadata),
                     source: MetadataSource::Vrcx,
@@ -56,7 +55,7 @@ pub async fn extract_metadata_with_source(file_path: &str) -> AppResult<Metadata
 
     // Priority 2: Try VRChat native XMP metadata
     if let Some(xmp_metadata) = extract_vrchat_xmp_metadata(file_path)? {
-        log::info!("Found VRChat XMP metadata in {}", file_path);
+        log::info!("Found VRChat XMP metadata in {file_path}");
         return Ok(MetadataWithSource {
             metadata: Some(xmp_metadata),
             source: MetadataSource::VrchatXmp,
@@ -64,7 +63,7 @@ pub async fn extract_metadata_with_source(file_path: &str) -> AppResult<Metadata
     }
 
     // Priority 3: Filename pattern (only provides timestamp, no actual metadata)
-    log::info!("No embedded metadata found in {}", file_path);
+    log::info!("No embedded metadata found in {file_path}");
     Ok(MetadataWithSource {
         metadata: None,
         source: MetadataSource::None,
@@ -72,7 +71,7 @@ pub async fn extract_metadata_with_source(file_path: &str) -> AppResult<Metadata
 }
 
 pub async fn extract_metadata(file_path: &str) -> AppResult<Option<ImageMetadata>> {
-    log::info!("Starting metadata extraction for: {}", file_path);
+    log::info!("Starting metadata extraction for: {file_path}");
 
     // Validate input first
     InputValidator::validate_image_file(file_path)?;
@@ -84,7 +83,7 @@ pub async fn extract_metadata(file_path: &str) -> AppResult<Option<ImageMetadata
 
     // Priority 1: Try to get VRCX-style metadata from PNG text chunks (Description)
     if let Some(metadata_json) = get_png_description(file_path)? {
-        log::info!("Found PNG Description metadata in {}", file_path);
+        log::info!("Found PNG Description metadata in {file_path}");
         log::debug!(
             "Raw metadata JSON (first 500 chars): {}",
             &metadata_json[..std::cmp::min(500, metadata_json.len())]
@@ -96,17 +95,15 @@ pub async fn extract_metadata(file_path: &str) -> AppResult<Option<ImageMetadata
         match serde_json::from_str::<serde_json::Value>(cleaned_json) {
             Ok(json) => {
                 log::info!("Successfully parsed VRCX JSON metadata");
-                log::debug!("Parsed JSON structure: {:#}", json);
+                log::debug!("Parsed JSON structure: {json:#}");
                 let metadata = parse_vrchat_metadata(json)?;
                 return Ok(Some(metadata));
             }
             Err(e) => {
                 log::warn!(
-                    "Failed to parse VRCX metadata JSON from {}: {}",
-                    file_path,
-                    e
+                    "Failed to parse VRCX metadata JSON from {file_path}: {e}"
                 );
-                log::debug!("Raw JSON that failed to parse (full): {}", metadata_json);
+                log::debug!("Raw JSON that failed to parse (full): {metadata_json}");
                 log::debug!("JSON length: {} bytes", metadata_json.len());
                 log::debug!(
                     "First 100 chars as bytes: {:?}",
@@ -130,28 +127,27 @@ pub async fn extract_metadata(file_path: &str) -> AppResult<Option<ImageMetadata
             }
         }
     } else {
-        log::info!("No VRCX PNG Description metadata found in {}", file_path);
+        log::info!("No VRCX PNG Description metadata found in {file_path}");
     }
 
     // Priority 2: Try to get VRChat native XMP metadata
-    log::info!("Trying VRChat XMP metadata extraction for {}", file_path);
+    log::info!("Trying VRChat XMP metadata extraction for {file_path}");
     if let Some(xmp_metadata) = extract_vrchat_xmp_metadata(file_path)? {
         log::info!(
-            "Successfully extracted VRChat XMP metadata from {}",
-            file_path
+            "Successfully extracted VRChat XMP metadata from {file_path}"
         );
         return Ok(Some(xmp_metadata));
     } else {
-        log::info!("No VRChat XMP metadata found in {}", file_path);
+        log::info!("No VRChat XMP metadata found in {file_path}");
     }
 
     // Priority 3: If no metadata found, try extracting from filename patterns
-    log::info!("Trying filename pattern extraction for {}", file_path);
+    log::info!("Trying filename pattern extraction for {file_path}");
     extract_metadata_from_filename(file_path)
 }
 
 fn get_png_description(file_path: &str) -> AppResult<Option<String>> {
-    log::debug!("Opening PNG file for chunk analysis: {}", file_path);
+    log::debug!("Opening PNG file for chunk analysis: {file_path}");
 
     let file = fs::File::open(file_path)?;
     let mut reader = BufReader::new(file);
@@ -162,7 +158,7 @@ fn get_png_description(file_path: &str) -> AppResult<Option<String>> {
 
     const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
     if signature != PNG_SIGNATURE {
-        log::warn!("File {} is not a valid PNG (invalid signature)", file_path);
+        log::warn!("File {file_path} is not a valid PNG (invalid signature)");
         return Err(AppError::invalid_file_type(file_path));
     }
 
@@ -192,7 +188,7 @@ fn get_png_description(file_path: &str) -> AppResult<Option<String>> {
         let chunk_type = &chunk_header[4..8];
         let chunk_type_str = std::str::from_utf8(chunk_type).unwrap_or("INVALID");
 
-        chunks_found.push(format!("{}({})", chunk_type_str, length));
+        chunks_found.push(format!("{chunk_type_str}({length})"));
 
         // Limit chunk size to prevent memory issues but be more generous for metadata
         const MAX_CHUNK_SIZE: usize = 50 * 1024 * 1024; // 50MB - much larger for big metadata
@@ -210,10 +206,7 @@ fn get_png_description(file_path: &str) -> AppResult<Option<String>> {
         if matches!(chunk_type_str, "tEXt" | "iTXt" | "zTXt") {
             text_chunks_found += 1;
             log::info!(
-                "Found text chunk #{}: {} with {} bytes",
-                text_chunks_found,
-                chunk_type_str,
-                length
+                "Found text chunk #{text_chunks_found}: {chunk_type_str} with {length} bytes"
             );
 
             let mut chunk_data = vec![0u8; length];
@@ -222,17 +215,16 @@ fn get_png_description(file_path: &str) -> AppResult<Option<String>> {
             // Try to extract Description from this chunk
             if let Some(description) = extract_description_from_chunk(chunk_type_str, &chunk_data) {
                 log::info!(
-                    "Successfully extracted Description from {} chunk!",
-                    chunk_type_str
+                    "Successfully extracted Description from {chunk_type_str} chunk!"
                 );
                 log::debug!("Description length: {} bytes", description.len());
                 return Ok(Some(description));
             } else {
-                log::debug!("No Description found in {} chunk", chunk_type_str);
+                log::debug!("No Description found in {chunk_type_str} chunk");
 
                 // Log what keywords we did find for debugging
                 if let Some(keyword) = get_chunk_keyword(chunk_type_str, &chunk_data) {
-                    log::debug!("Chunk keyword found: '{}'", keyword);
+                    log::debug!("Chunk keyword found: '{keyword}'");
                 } else {
                     log::debug!("No keyword found in chunk");
                 }
@@ -252,9 +244,9 @@ fn get_png_description(file_path: &str) -> AppResult<Option<String>> {
         }
     }
 
-    log::info!("PNG Analysis Summary for {}:", file_path);
+    log::info!("PNG Analysis Summary for {file_path}:");
     log::info!("   Total chunks found: [{}]", chunks_found.join(", "));
-    log::info!("   Text chunks found: {}", text_chunks_found);
+    log::info!("   Text chunks found: {text_chunks_found}");
     log::info!("   No Description metadata found");
 
     Ok(None)
@@ -298,7 +290,7 @@ fn extract_from_text_chunk(data: &[u8]) -> Option<String> {
     let null_pos = data.iter().position(|&b| b == 0)?;
     let keyword = std::str::from_utf8(&data[..null_pos]).ok()?;
 
-    log::debug!("tEXt chunk keyword: '{}'", keyword);
+    log::debug!("tEXt chunk keyword: '{keyword}'");
 
     // Case-insensitive comparison for Description
     if keyword.eq_ignore_ascii_case("Description") {
@@ -344,7 +336,7 @@ fn extract_from_international_text_chunk(data: &[u8]) -> Option<String> {
         .map(|(i, _)| i)
         .collect();
 
-    log::debug!("Found null positions: {:?}", null_positions);
+    log::debug!("Found null positions: {null_positions:?}");
 
     if null_positions.len() < 4 {
         log::debug!(
@@ -356,12 +348,12 @@ fn extract_from_international_text_chunk(data: &[u8]) -> Option<String> {
 
     // Extract keyword (up to first null)
     let keyword = std::str::from_utf8(&data[..null_positions[0]]).ok()?;
-    log::debug!("iTXt chunk keyword: '{}'", keyword);
+    log::debug!("iTXt chunk keyword: '{keyword}'");
 
     if keyword.eq_ignore_ascii_case("Description") {
         // Get compression flag
         let compression_flag = data.get(null_positions[0] + 1).copied().unwrap_or(0);
-        log::debug!("iTXt compression flag: {}", compression_flag);
+        log::debug!("iTXt compression flag: {compression_flag}");
 
         if compression_flag == 0 {
             // Uncompressed text starts after the 5th null byte (or at least 4 null bytes)
@@ -405,11 +397,11 @@ fn extract_from_compressed_text_chunk(data: &[u8]) -> Option<String> {
     let null_pos = data.iter().position(|&b| b == 0)?;
     let keyword = std::str::from_utf8(&data[..null_pos]).ok()?;
 
-    log::debug!("zTXt chunk keyword: '{}'", keyword);
+    log::debug!("zTXt chunk keyword: '{keyword}'");
 
     if keyword.eq_ignore_ascii_case("Description") && data.len() > null_pos + 2 {
         let compression_method = data[null_pos + 1];
-        log::debug!("zTXt compression method: {}", compression_method);
+        log::debug!("zTXt compression method: {compression_method}");
 
         if compression_method == 0 {
             // Deflate compression
@@ -433,7 +425,7 @@ fn decompress_deflate_data(compressed_data: &[u8]) -> Option<String> {
 
     match decoder.read_to_end(&mut decompressed) {
         Ok(size) => {
-            log::debug!("Successfully decompressed {} bytes", size);
+            log::debug!("Successfully decompressed {size} bytes");
             log::debug!(
                 "First 100 decompressed chars: {}",
                 std::str::from_utf8(&decompressed)
@@ -447,7 +439,7 @@ fn decompress_deflate_data(compressed_data: &[u8]) -> Option<String> {
                 .map(|s| s.to_string());
         }
         Err(e) => {
-            log::warn!("Failed to decompress deflate data: {}", e);
+            log::warn!("Failed to decompress deflate data: {e}");
         }
     }
 
@@ -462,8 +454,7 @@ fn decompress_deflate_data(compressed_data: &[u8]) -> Option<String> {
 /// - XMP:WorldDisplayName
 fn extract_vrchat_xmp_metadata(file_path: &str) -> AppResult<Option<ImageMetadata>> {
     log::debug!(
-        "Attempting to extract VRChat XMP metadata from: {}",
-        file_path
+        "Attempting to extract VRChat XMP metadata from: {file_path}"
     );
 
     let file = fs::File::open(file_path)?;
@@ -544,7 +535,7 @@ fn extract_vrchat_xmp_metadata(file_path: &str) -> AppResult<Option<ImageMetadat
                     || text_content.contains("WorldID")
                     || text_content.contains("AuthorID")
                 {
-                    log::debug!("Found potential XMP data in {} chunk", chunk_type_str);
+                    log::debug!("Found potential XMP data in {chunk_type_str} chunk");
                     if let Some(metadata) = parse_vrchat_xmp(&text_content) {
                         return Ok(Some(metadata));
                     }
@@ -588,7 +579,7 @@ fn extract_xmp_from_itxt(data: &[u8]) -> Option<String> {
         || keyword.contains("XML:com.adobe.xmp")
         || keyword.eq_ignore_ascii_case("xpacket")
     {
-        log::debug!("Found XMP iTXt chunk with keyword: {}", keyword);
+        log::debug!("Found XMP iTXt chunk with keyword: {keyword}");
 
         if null_positions.len() >= 4 {
             let compression_flag = data.get(null_positions[0] + 1).copied().unwrap_or(0);
@@ -691,7 +682,7 @@ fn parse_vrchat_xmp(xmp_content: &str) -> Option<ImageMetadata> {
         let id = author_id.unwrap_or_default();
         let name = author_name.unwrap_or_default();
 
-        log::debug!("Found XMP Author: {} ({})", name, id);
+        log::debug!("Found XMP Author: {name} ({id})");
         metadata.author = Some(AuthorInfo {
             display_name: name,
             id,
@@ -704,7 +695,7 @@ fn parse_vrchat_xmp(xmp_content: &str) -> Option<ImageMetadata> {
         let id = world_id.unwrap_or_default();
         let name = world_name.unwrap_or_default();
 
-        log::debug!("Found XMP World: {} ({})", name, id);
+        log::debug!("Found XMP World: {name} ({id})");
 
         metadata.world = Some(WorldInfo {
             name,
@@ -810,7 +801,7 @@ fn parse_vrchat_metadata(json: serde_json::Value) -> AppResult<ImageMetadata> {
             author_obj.get("displayName").and_then(|v| v.as_str()),
             author_obj.get("id").and_then(|v| v.as_str()),
         ) {
-            log::debug!("Found author: {} ({})", name, id);
+            log::debug!("Found author: {name} ({id})");
             metadata.author = Some(AuthorInfo {
                 display_name: name.to_string(),
                 id: id.to_string(),
@@ -835,10 +826,7 @@ fn parse_vrchat_metadata(json: serde_json::Value) -> AppResult<ImageMetadata> {
             .unwrap_or("");
 
         log::debug!(
-            "Found world: {} ({}) - Instance: {}",
-            world_name,
-            world_id,
-            instance_id
+            "Found world: {world_name} ({world_id}) - Instance: {instance_id}"
         );
 
         metadata.world = Some(WorldInfo {
@@ -882,14 +870,14 @@ fn extract_metadata_from_filename(file_path: &str) -> AppResult<Option<ImageMeta
         .and_then(|n| n.to_str())
         .unwrap_or("");
 
-    log::debug!("Checking filename for timestamp pattern: {}", filename);
+    log::debug!("Checking filename for timestamp pattern: {filename}");
 
     // Try to extract timestamp from filename pattern: YYYY-MM-DD_HH-MM-SS
     let date_regex = regex::Regex::new(r"(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2}(?:\.\d+)?)")
-        .map_err(|e| AppError::Internal(format!("Regex error: {}", e)))?;
+        .map_err(|e| AppError::Internal(format!("Regex error: {e}")))?;
 
     if date_regex.is_match(filename) {
-        log::info!("Found VRChat-style timestamp in filename: {}", filename);
+        log::info!("Found VRChat-style timestamp in filename: {filename}");
         log::info!("This suggests it's a VRChat screenshot, but no embedded metadata was found");
     } else {
         log::debug!("No VRChat timestamp pattern found in filename");
@@ -928,10 +916,7 @@ pub async fn resize_image_simple(file_path: &str, scale: f32) -> AppResult<Strin
     let new_height = (img.height() as f32 * scale) as u32;
 
     log::info!(
-        "Resizing image to {}x{} (scale {:.2})",
-        new_width,
-        new_height,
-        scale
+        "Resizing image to {new_width}x{new_height} (scale {scale:.2})"
     );
 
     // Use Triangle (bilinear) as a fast "box-like" filter
@@ -962,7 +947,7 @@ pub async fn compress_image_with_format(
 
     if let Some(s) = scale {
         if (s - 1.0).abs() > f32::EPSILON {
-            log::info!("Applying resolution scale: {:.2}x", s);
+            log::info!("Applying resolution scale: {s:.2}x");
             let resized_path = resize_image_simple(file_path, s).await?;
             current_path = resized_path.clone();
             intermediate_temp = Some(resized_path);
@@ -994,8 +979,7 @@ async fn compress_image_with_format_internal(
 
         if file_size > SMART_RESIZE_THRESHOLD {
             log::info!(
-                "Smart PNG: File size {} > 10MB, applying Box resizing (50%)",
-                file_size
+                "Smart PNG: File size {file_size} > 10MB, applying Box resizing (50%)"
             );
             return resize_image_box(file_path, 0.5).await;
         } else {
@@ -1005,16 +989,14 @@ async fn compress_image_with_format_internal(
 
             if is_already_png {
                 log::info!(
-                    "Smart PNG: File size {} <= 10MB and already PNG, fast-copying",
-                    file_size
+                    "Smart PNG: File size {file_size} <= 10MB and already PNG, fast-copying"
                 );
                 tokio::fs::copy(file_path, &output_path)
                     .await
-                    .map_err(|e| AppError::Io(e))?;
+                    .map_err(AppError::Io)?;
             } else {
                 log::info!(
-                    "Smart PNG: File size {} <= 10MB but not PNG, converting",
-                    file_size
+                    "Smart PNG: File size {file_size} <= 10MB but not PNG, converting"
                 );
                 let file_path_owned = file_path.to_string();
                 let output_path_clone = output_path.clone();
@@ -1025,7 +1007,7 @@ async fn compress_image_with_format_internal(
                     Ok::<_, AppError>(())
                 })
                 .await
-                .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
+                .map_err(|e| AppError::ImageProcessing(format!("Task failed: {e}")))??;
             }
             Ok(output_path.to_string_lossy().to_string())
         }
@@ -1036,12 +1018,11 @@ async fn compress_image_with_format_internal(
 
         if is_already_png && file_size <= 10 * 1024 * 1024 {
             log::info!(
-                "PNG: File size {} <= 10MB and already PNG, fast-copying",
-                file_size
+                "PNG: File size {file_size} <= 10MB and already PNG, fast-copying"
             );
             tokio::fs::copy(file_path, &output_path)
                 .await
-                .map_err(|e| AppError::Io(e))?;
+                .map_err(AppError::Io)?;
         } else {
             let file_path_owned = file_path.to_string();
             let output_path_clone = output_path.clone();
@@ -1049,11 +1030,11 @@ async fn compress_image_with_format_internal(
                 let img = load_image_efficiently(&file_path_owned)?;
                 img.save_with_format(&output_path_clone, image::ImageFormat::Png)
                     .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
-                log::info!("Converted {} to PNG", file_path_owned);
+                log::info!("Converted {file_path_owned} to PNG");
                 Ok::<_, AppError>(())
             })
             .await
-            .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
+            .map_err(|e| AppError::ImageProcessing(format!("Task failed: {e}")))??;
         }
         Ok(output_path.to_string_lossy().to_string())
     } else if format == "lossless_webp" {
@@ -1070,11 +1051,11 @@ async fn compress_image_with_format_internal(
             let webp_data = encoder.encode_lossless();
 
             fs::write(&output_path_clone, &*webp_data)?;
-            log::info!("Compressed {} to Lossless WebP", file_path_owned);
+            log::info!("Compressed {file_path_owned} to Lossless WebP");
             Ok::<_, AppError>(())
         })
         .await
-        .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
+        .map_err(|e| AppError::ImageProcessing(format!("Task failed: {e}")))??;
 
         Ok(output_path.to_string_lossy().to_string())
     } else if format == "jpg" {
@@ -1101,7 +1082,7 @@ async fn compress_image_with_format_internal(
             Ok::<_, AppError>(())
         })
         .await
-        .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
+        .map_err(|e| AppError::ImageProcessing(format!("Task failed: {e}")))??;
 
         Ok(output_path.to_string_lossy().to_string())
     } else if format == "avif" {
@@ -1116,7 +1097,7 @@ async fn compress_image_with_format_internal(
             Ok::<_, AppError>((rgba_img, width, height))
         })
         .await
-        .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
+        .map_err(|e| AppError::ImageProcessing(format!("Task failed: {e}")))??;
 
         // Encode to AVIF using ravif (runs in blocking thread pool with multi-threading)
         let avif_data = encode_avif(rgba_img, width, height, quality).await?;
@@ -1155,7 +1136,7 @@ async fn compress_image_with_format_internal(
             Ok::<_, AppError>(())
         })
         .await
-        .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
+        .map_err(|e| AppError::ImageProcessing(format!("Task failed: {e}")))??;
 
         Ok(output_path.to_string_lossy().to_string())
     }
@@ -1174,10 +1155,7 @@ pub async fn resize_image_box(file_path: &str, scale: f32) -> AppResult<String> 
         let height = (img.height() as f32 * scale) as u32;
 
         log::info!(
-            "Resizing {} to {}x{} (Lanczos3)",
-            file_path_owned,
-            width,
-            height
+            "Resizing {file_path_owned} to {width}x{height} (Lanczos3)"
         );
 
         // Using Lanczos3 for high quality downscaling (better than Box for photos)
@@ -1190,7 +1168,7 @@ pub async fn resize_image_box(file_path: &str, scale: f32) -> AppResult<String> 
         Ok::<_, AppError>(())
     })
     .await
-    .map_err(|e| AppError::ImageProcessing(format!("Task failed: {}", e)))??;
+    .map_err(|e| AppError::ImageProcessing(format!("Task failed: {e}")))??;
 
     Ok(output_path.to_string_lossy().to_string())
 }
@@ -1262,12 +1240,12 @@ async fn encode_avif(
         // Encode the image
         let result = encoder
             .encode_rgba(img)
-            .map_err(|e| AppError::ImageProcessing(format!("AVIF encoding failed: {}", e)))?;
+            .map_err(|e| AppError::ImageProcessing(format!("AVIF encoding failed: {e}")))?;
 
         Ok(result.avif_file)
     })
     .await
-    .map_err(|e| AppError::ImageProcessing(format!("AVIF encoding task failed: {}", e)))?
+    .map_err(|e| AppError::ImageProcessing(format!("AVIF encoding task failed: {e}")))?
 }
 
 pub async fn get_file_hash(file_path: &str) -> AppResult<String> {
@@ -1314,30 +1292,28 @@ pub fn get_timestamp_from_filename(file_path: &str) -> Option<i64> {
         let date_part = captures.get(1)?.as_str();
         let time_part = captures.get(2)?.as_str().replace('-', ":");
 
-        let datetime_str = format!("{} {}", date_part, time_part);
-        log::debug!("Parsing datetime from filename: {}", datetime_str);
+        let datetime_str = format!("{date_part} {time_part}");
+        log::debug!("Parsing datetime from filename: {datetime_str}");
 
         // Try different datetime formats
         let formats = ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d %H:%M:%S"];
 
         for format in &formats {
             if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&datetime_str, format) {
-                log::debug!("Parsed NaiveDateTime: {}", dt);
+                log::debug!("Parsed NaiveDateTime: {dt}");
 
                 // VRChat screenshots are saved in local time
                 // Get current system timezone offset
                 let local_offset = chrono::Local::now().offset().fix();
-                log::debug!("Local timezone offset: {}", local_offset);
+                log::debug!("Local timezone offset: {local_offset}");
 
                 // Convert to local datetime with timezone
                 match dt.and_local_timezone(local_offset).single() {
                     Some(local_dt) => {
                         let utc_timestamp = local_dt.timestamp();
-                        log::debug!("Local datetime: {}", local_dt);
+                        log::debug!("Local datetime: {local_dt}");
                         log::debug!(
-                            "UTC timestamp: {} (Discord: <t:{}:f>)",
-                            utc_timestamp,
-                            utc_timestamp
+                            "UTC timestamp: {utc_timestamp} (Discord: <t:{utc_timestamp}:f>)"
                         );
                         return Some(utc_timestamp);
                     }
@@ -1346,7 +1322,7 @@ pub fn get_timestamp_from_filename(file_path: &str) -> Option<i64> {
                         // During DST transitions, pick the earliest interpretation
                         if let Some(local_dt) = dt.and_local_timezone(local_offset).earliest() {
                             let utc_timestamp = local_dt.timestamp();
-                            log::debug!("Using earliest DST interpretation: {}", local_dt);
+                            log::debug!("Using earliest DST interpretation: {local_dt}");
                             return Some(utc_timestamp);
                         } else {
                             log::warn!("Could not resolve DST ambiguity, using UTC fallback");
@@ -1358,9 +1334,7 @@ pub fn get_timestamp_from_filename(file_path: &str) -> Option<i64> {
                 let utc_timestamp = dt.and_utc().timestamp();
                 log::warn!("FALLBACK: Treating timestamp as UTC. This may be incorrect by your timezone offset.");
                 log::debug!(
-                    "Fallback UTC timestamp: {} (Discord: <t:{}:f>)",
-                    utc_timestamp,
-                    utc_timestamp
+                    "Fallback UTC timestamp: {utc_timestamp} (Discord: <t:{utc_timestamp}:f>)"
                 );
                 return Some(utc_timestamp);
             }
@@ -1373,9 +1347,7 @@ pub fn get_timestamp_from_filename(file_path: &str) -> Option<i64> {
             if let Ok(duration) = created.duration_since(std::time::UNIX_EPOCH) {
                 let timestamp = duration.as_secs() as i64;
                 log::debug!(
-                    "Using file creation time: {} (Discord: <t:{}:f>)",
-                    timestamp,
-                    timestamp
+                    "Using file creation time: {timestamp} (Discord: <t:{timestamp}:f>)"
                 );
                 return Some(timestamp);
             }
@@ -1405,9 +1377,7 @@ pub fn generate_thumbnail(file_path: &str, max_dimension: u32) -> AppResult<Stri
     InputValidator::validate_image_file(file_path)?;
 
     log::debug!(
-        "Generating thumbnail for {} with max dimension {}",
-        file_path,
-        max_dimension
+        "Generating thumbnail for {file_path} with max dimension {max_dimension}"
     );
 
     // Load the image

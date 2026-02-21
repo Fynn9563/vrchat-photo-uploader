@@ -197,7 +197,7 @@ pub fn load_config() -> AppResult<AppConfig> {
     if config_path.exists() {
         let config_str = fs::read_to_string(&config_path)?;
         let config: Config = serde_json::from_str(&config_str).unwrap_or_else(|e| {
-            log::warn!("Failed to parse config file: {}. Using defaults.", e);
+            log::warn!("Failed to parse config file: {e}. Using defaults.");
             Config::default()
         });
 
@@ -226,7 +226,7 @@ fn save_config_internal(config: &Config) -> AppResult<()> {
     if config_path.exists() {
         let backup_path = config_path.with_extension("json.bak");
         if let Err(e) = fs::copy(&config_path, &backup_path) {
-            log::warn!("Failed to create config backup: {}", e);
+            log::warn!("Failed to create config backup: {e}");
         }
     }
 
@@ -384,9 +384,7 @@ pub async fn auto_cleanup() -> AppResult<()> {
     }
 
     log::info!(
-        "Auto-cleanup completed: {} sessions, {} history entries cleaned",
-        sessions_cleaned,
-        history_cleaned
+        "Auto-cleanup completed: {sessions_cleaned} sessions, {history_cleaned} history entries cleaned"
     );
 
     Ok(())
@@ -420,4 +418,177 @@ fn cleanup_old_files(directory: &PathBuf, days: i32) -> AppResult<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config_values() {
+        let config = Config::default();
+        assert_eq!(config.max_images_per_message, 10);
+        assert_eq!(config.upload_quality, 85);
+        assert_eq!(config.theme, "dark");
+        assert_eq!(config.auto_compress_threshold, 8);
+        assert_eq!(config.auto_cleanup_days, 30);
+        assert_eq!(config.rate_limit_delay_ms, 1000);
+        assert_eq!(config.max_retry_attempts, 3);
+        assert!(!config.enable_auto_upload);
+        assert!(config.group_by_metadata);
+        assert!(config.preserve_timestamps);
+        assert!(config.show_upload_notifications);
+        assert_eq!(config.compression_format, "webp");
+        assert_eq!(config.log_level, "info");
+    }
+
+    #[test]
+    fn test_config_serde_roundtrip() {
+        let config = Config::default();
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.max_images_per_message, config.max_images_per_message);
+        assert_eq!(deserialized.upload_quality, config.upload_quality);
+        assert_eq!(deserialized.theme, config.theme);
+        assert_eq!(deserialized.compression_format, config.compression_format);
+        assert_eq!(deserialized.auto_upload_delay_seconds, config.auto_upload_delay_seconds);
+    }
+
+    #[test]
+    fn test_config_missing_optional_fields_use_defaults() {
+        let json = r#"{
+            "last_webhook_id": null,
+            "group_by_metadata": true,
+            "max_images_per_message": 5,
+            "enable_global_shortcuts": true,
+            "theme": "dark",
+            "upload_quality": 90,
+            "auto_compress_threshold": 8,
+            "preserve_timestamps": true,
+            "auto_cleanup_days": 30,
+            "rate_limit_delay_ms": 1000,
+            "max_retry_attempts": 3,
+            "backup_original_files": false,
+            "show_upload_notifications": true,
+            "log_level": "info",
+            "compression_format": "webp",
+            "enable_auto_upload": false,
+            "auto_upload_webhook_id": null,
+            "vrchat_path": null
+        }"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        // Fields with #[serde(default)] should use their defaults
+        assert!(!config.single_thread_mode);
+        assert!(!config.merge_no_metadata);
+        assert!(!config.default_forum_mode);
+        assert_eq!(config.auto_upload_delay_seconds, 5);
+        assert_eq!(config.auto_upload_batch_size, 10);
+        assert!(config.auto_upload_ignored_folders.is_empty());
+    }
+
+    #[test]
+    fn test_config_to_app_config_conversion() {
+        let config = Config::default();
+        let app_config: AppConfig = config.into();
+        assert_eq!(app_config.max_images_per_message, 10);
+        assert_eq!(app_config.upload_quality, 85);
+        assert_eq!(app_config.compression_format, "webp");
+        assert!(!app_config.enable_auto_upload);
+    }
+
+    #[test]
+    fn test_app_config_to_config_conversion() {
+        let config = Config::default();
+        let app_config: AppConfig = config.into();
+        let config_back: Config = app_config.into();
+        assert_eq!(config_back.max_images_per_message, 10);
+        assert_eq!(config_back.upload_quality, 85);
+    }
+
+    #[test]
+    fn test_validate_config_valid() {
+        let config = Config::default();
+        assert!(validate_config(&config).is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_invalid_max_images_zero() {
+        let mut config = Config::default();
+        config.max_images_per_message = 0;
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_config_invalid_max_images_over_10() {
+        let mut config = Config::default();
+        config.max_images_per_message = 11;
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_config_invalid_quality_zero() {
+        let mut config = Config::default();
+        config.upload_quality = 0;
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_config_invalid_quality_over_100() {
+        let mut config = Config::default();
+        config.upload_quality = 101;
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_config_invalid_theme() {
+        let mut config = Config::default();
+        config.theme = "purple".to_string();
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_config_valid_themes() {
+        for theme in &["dark", "light", "auto"] {
+            let mut config = Config::default();
+            config.theme = theme.to_string();
+            assert!(validate_config(&config).is_ok(), "Theme '{theme}' should be valid");
+        }
+    }
+
+    #[test]
+    fn test_validate_config_invalid_compression_format() {
+        let mut config = Config::default();
+        config.compression_format = "bmp".to_string();
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_config_valid_compression_formats() {
+        for fmt in &["webp", "lossless_webp", "png", "jpg", "avif"] {
+            let mut config = Config::default();
+            config.compression_format = fmt.to_string();
+            assert!(validate_config(&config).is_ok(), "Format '{fmt}' should be valid");
+        }
+    }
+
+    #[test]
+    fn test_validate_config_invalid_rate_limit() {
+        let mut config = Config::default();
+        config.rate_limit_delay_ms = 50; // Below 100ms minimum
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_config_invalid_retry_attempts() {
+        let mut config = Config::default();
+        config.max_retry_attempts = 11; // Over 10
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_config_invalid_log_level() {
+        let mut config = Config::default();
+        config.log_level = "verbose".to_string();
+        assert!(validate_config(&config).is_err());
+    }
 }

@@ -85,15 +85,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Waiting for Tests workflow to complete for commit ${{ github.sha }}..."
-          for i in $(seq 1 40); do
+          for i in $(seq 1 30); do
             RUN_ID=$(gh api "repos/${{ github.repository }}/actions/workflows/test.yaml/runs?head_sha=${{ github.sha }}&per_page=1" --jq '.workflow_runs[0].id // empty' 2>/dev/null || echo "")
             if [ -n "$RUN_ID" ]; then
               echo "Found Tests workflow run: $RUN_ID"
               gh run watch "$RUN_ID" --repo "${{ github.repository }}" --exit-status
               exit $?
             fi
-            echo "Waiting for Tests workflow to start (attempt $i/40)..."
-            sleep 15
+            echo "Waiting for Tests workflow to start (attempt $i/30)..."
+            sleep 10
           done
           echo "❌ Tests workflow not found for this commit"
           exit 1
@@ -162,7 +162,7 @@ jobs:
         run: |
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
           CARGO_VERSION=$(grep '^version = ' src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').package.version")
+          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
 
           echo "📋 Version Check:"
           echo "  package.json: $PACKAGE_VERSION"
@@ -237,11 +237,11 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0.5
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         with:
           tagName: v${{ needs.get-version.outputs.version }}
           releaseName: 'VRChat Photo Uploader v${{ needs.get-version.outputs.version }}'
@@ -442,14 +442,27 @@ jobs:
             echo "✅ Dependencies installed successfully"
           fi
 
-      - name: Build frontend
-        run: pnpm run build
+      - name: Build Tauri app (test build)
+        shell: bash
+        run: pnpm tauri build --features nasm
 
-      - name: Test Tauri build
+      - name: List build artifacts
         shell: bash
         run: |
-          cd src-tauri
-          cargo build --release --features nasm
+          echo "📦 Build artifacts that would be included in a release:"
+          echo ""
+          BUNDLE_DIR="src-tauri/target/release/bundle"
+          if [ -d "$BUNDLE_DIR" ]; then
+            find "$BUNDLE_DIR" -type f | while read -r file; do
+              SIZE=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
+              SIZE_MB=$(echo "scale=2; $SIZE / 1048576" | bc 2>/dev/null || echo "${SIZE}B")
+              echo "  $(basename "$file") — ${SIZE_MB} MB"
+            done
+          else
+            echo "⚠️ No bundle directory found at $BUNDLE_DIR"
+            echo "Checking target directory structure:"
+            find src-tauri/target/release -maxdepth 3 -type d 2>/dev/null | head -20
+          fi
 
       - name: Upload PR build artifacts
         if: github.event_name == 'pull_request'

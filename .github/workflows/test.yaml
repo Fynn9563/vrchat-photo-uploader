@@ -178,6 +178,38 @@ jobs:
           # Custom accessibility test script would go here
           echo "Accessibility tests would run here"
 
+  discord-integration-tests:
+    runs-on: ubuntu-22.04
+    name: Discord Integration Tests
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
+        with:
+          os: ubuntu
+
+      - name: Run Discord webhook tests
+        run: |
+          echo "🔌 Running Discord integration tests..."
+          cd src-tauri
+          CARGO_CFG_TEST=1 xvfb-run -a --server-args="-screen 0 1024x768x24 -ac +extension GLX +render -noreset" \
+            cargo test --test discord_webhook_tests -- --ignored --nocapture 2>/dev/null
+        env:
+          DISPLAY: ":99.0"
+          XAUTHORITY: ""
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_FORUM_WEBHOOK_URL: ${{ secrets.DISCORD_FORUM_WEBHOOK_URL }}
+
   security-scan:
     runs-on: ubuntu-22.04
     name: Security Scan
@@ -219,7 +251,7 @@ jobs:
   test-summary:
     runs-on: ubuntu-22.04
     name: Test Summary
-    needs: [frontend-tests, backend-tests, lint-and-format, security-scan]
+    needs: [frontend-tests, backend-tests, lint-and-format, security-scan, discord-integration-tests]
     if: always()
     steps:
       - name: Check test results
@@ -229,13 +261,16 @@ jobs:
           echo "Backend tests: ${{ needs.backend-tests.result }}"
           echo "Lint and format: ${{ needs.lint-and-format.result }}"
           echo "Security scan: ${{ needs.security-scan.result }}"
-          
-          if [[ "${{ needs.frontend-tests.result }}" == "failure" || 
-                "${{ needs.backend-tests.result }}" == "failure" || 
-                "${{ needs.lint-and-format.result }}" == "failure" || 
+          echo "Discord integration: ${{ needs.discord-integration-tests.result }}"
+
+          if [[ "${{ needs.frontend-tests.result }}" == "failure" ||
+                "${{ needs.backend-tests.result }}" == "failure" ||
+                "${{ needs.lint-and-format.result }}" == "failure" ||
                 "${{ needs.security-scan.result }}" == "failure" ]]; then
             echo "❌ Some tests failed"
             exit 1
+          elif [[ "${{ needs.discord-integration-tests.result }}" == "failure" ]]; then
+            echo "⚠️ Discord integration tests failed (non-blocking)"
           else
             echo "✅ All tests passed"
           fi

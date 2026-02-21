@@ -144,7 +144,7 @@ pub async fn retry_single_upload(
             });
 
             update_progress_success(&progress_state, &session_id, file_path.clone());
-            log::info!("Successfully retried upload for {}", file_path);
+            log::info!("Successfully retried upload for {file_path}");
         }
         Err(e) => {
             let is_retryable = e.is_retryable();
@@ -153,7 +153,7 @@ pub async fn retry_single_upload(
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            let error_message = format!("Retry failed: {}", e);
+            let error_message = format!("Retry failed: {e}");
             let webhook_id = webhook.id;
             let file_path_for_db = file_path.clone();
 
@@ -177,7 +177,7 @@ pub async fn retry_single_upload(
                 e.to_string(),
                 is_retryable,
             );
-            log::error!("Retry failed for {}: {}", file_path, e);
+            log::error!("Retry failed for {file_path}: {e}");
         }
     }
 
