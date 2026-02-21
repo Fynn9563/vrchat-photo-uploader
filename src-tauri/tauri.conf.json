@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "VRChat Photo Uploader",
-    "version": "3.1.0"
+    "version": "3.1.1"
   },
   "tauri": {
     "allowlist": {
@@ -63,7 +63,7 @@
     },
     "bundle": {
       "active": true,
-      "targets": "all",
+      "targets": ["nsis", "deb", "rpm", "appimage"],
       "identifier": "com.vrchat.photo.uploader",
       "icon": [
         "icons/32x32.png",

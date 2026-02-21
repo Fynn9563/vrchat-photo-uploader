@@ -782,7 +782,8 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<(), Strin
                 // Show update dialog
                 match update_response.download_and_install().await {
                     Ok(()) => {
-                        log::info!("Update downloaded and installed successfully");
+                        log::info!("Update downloaded and installed successfully, restarting...");
+                        app_handle.restart();
                         Ok(())
                     }
                     Err(e) => {

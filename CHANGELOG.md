@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1] - 2026-02-22
+
+### Fixed
+- Fixed auto-updater failing on Windows for users who installed via the NSIS `.exe` setup
+- Changed bundle targets from "all" to specific installers so the update manifest correctly maps to NSIS instead of MSI
+- App now restarts after installing an update to ensure the installer can replace files
+
 ## [3.1.0] - 2025-01-17
 
 ### Added
