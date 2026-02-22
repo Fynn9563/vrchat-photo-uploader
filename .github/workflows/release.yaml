@@ -1,12 +1,11 @@
 name: 'Build and Release'
 
 on:
-  push:
+  # Triggers automatically after the Tests workflow completes on main/master
+  workflow_run:
+    workflows: ["Tests"]
+    types: [completed]
     branches: [main, master]
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
-      - 'LICENSE'
   pull_request:
     branches: [main, master]
   workflow_dispatch:
@@ -21,12 +20,17 @@ env:
 jobs:
   get-version:
     runs-on: ubuntu-latest
+    # Skip if tests failed (workflow_run fires on any completion)
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     outputs:
       version: ${{ steps.version.outputs.version }}
       should_release: ${{ steps.version.outputs.should_release }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha || '' }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -66,10 +70,12 @@ jobs:
             echo "Tag v$VERSION already exists, skipping release"
             SHOULD_RELEASE="false"
           else
-            # Check if we should create a release (only on main/master pushes or manual trigger)
+            # Check if we should create a release
+            # workflow_run on main/master = tests passed on push to default branch
+            # workflow_dispatch = manual trigger
             SHOULD_RELEASE="false"
             if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
-               [[ "${{ github.event_name }}" == "push" && ("${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master") ]]; then
+               [[ "${{ github.event_name }}" == "workflow_run" ]]; then
               SHOULD_RELEASE="true"
             fi
           fi
@@ -77,29 +83,8 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "should_release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
 
-  wait-for-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for Tests workflow to pass
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Waiting for Tests workflow to complete for commit ${{ github.sha }}..."
-          for i in $(seq 1 30); do
-            RUN_ID=$(gh api "repos/${{ github.repository }}/actions/workflows/test.yaml/runs?head_sha=${{ github.sha }}&per_page=1" --jq '.workflow_runs[0].id // empty' 2>/dev/null || echo "")
-            if [ -n "$RUN_ID" ]; then
-              echo "Found Tests workflow run: $RUN_ID"
-              gh run watch "$RUN_ID" --repo "${{ github.repository }}" --exit-status
-              exit $?
-            fi
-            echo "Waiting for Tests workflow to start (attempt $i/30)..."
-            sleep 10
-          done
-          echo "❌ Tests workflow not found for this commit"
-          exit 1
-
   build-and-release:
-    needs: [get-version, wait-for-tests]
+    needs: [get-version]
     if: needs.get-version.outputs.should_release == 'true'
     strategy:
       fail-fast: false
@@ -116,6 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
@@ -385,7 +371,7 @@ jobs:
           retention-days: 90
 
   build-test:
-    needs: [get-version, wait-for-tests]
+    needs: [get-version]
     if: needs.get-version.outputs.should_release == 'false'
     strategy:
       fail-fast: false
