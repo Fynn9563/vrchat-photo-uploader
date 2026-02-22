@@ -1,6 +1,6 @@
 [package]
 name = "VRChat-Photo-Uploader"
-version = "3.1.1"
+version = "4.0.0"
 description = "A powerful tool for uploading VRChat photos to Discord"
 authors = ["Fynn9563"]
 repository = "https://github.com/fynn9563/vrchat-photo-uploader"
@@ -10,40 +10,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
-tauri-build = { version = "1.5.1", features = [] }
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "1.8.3", features = [ "protocol-asset",
-    # File system operations
-    "fs-remove-file",
-    "fs-read-dir",
-    "fs-copy-file", 
-    "fs-create-dir",
-    "fs-exists",
-    "fs-read-file",
-    "fs-write-file",
-    
-    # Dialog operations
-    "dialog-message",
-    "dialog-save",
-    "dialog-open",
-    
-    # Path and OS operations
-    "path-all",
-    "os-all",
-    
-    # System integration
-    "global-shortcut-all",
-    "shell-open",
-    "system-tray",
-    "notification-all",
-    
-    # Update functionality
-    "updater",
-    
-    # Development
-    "devtools"
-] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "devtools"] }
 
 # Dependencies for manual single-instance implementation
 sysinfo = "0.30"
@@ -77,12 +47,21 @@ ravif = { version = "0.11", default-features = false, features = ["threading"] }
 rgb = "0.8"
 flate2 = "1.0.28"
 notify = "6.1"
+tauri-plugin-os = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-fs = "2"
 
 [features]
 default = []
 custom-protocol = ["tauri/custom-protocol"]
 # Enable NASM-optimized AVIF encoding (faster, requires NASM installed at build time)
 nasm = ["ravif/asm"]
+
+[dev-dependencies]
+serial_test = "3"
+dotenvy = "0.15"
 
 [profile.release]
 panic = "abort"
@@ -98,3 +77,7 @@ debug = true
 [[bin]]
 name = "VRChat-Photo-Uploader"
 path = "src/main.rs"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-updater = "2"

@@ -1,4 +1,3 @@
-use serde_json;
 use std::fs;
 use std::path::Path;
 
@@ -26,7 +25,7 @@ pub async fn embed_metadata(file_path: &str, metadata: ImageMetadata) -> AppResu
     let parent = path.parent().unwrap_or(Path::new("."));
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let extension = path.extension().unwrap_or_default().to_string_lossy();
-    let output_path = parent.join(format!("{}_Modified.{}", stem, extension));
+    let output_path = parent.join(format!("{stem}_Modified.{extension}"));
 
     // Check if output file already exists and try to remove it
     if output_path.exists() {
@@ -37,7 +36,7 @@ pub async fn embed_metadata(file_path: &str, metadata: ImageMetadata) -> AppResu
         match std::fs::remove_file(&output_path) {
             Ok(_) => log::info!("Successfully removed existing file"),
             Err(e) => {
-                log::error!("Failed to remove existing file: {}", e);
+                log::error!("Failed to remove existing file: {e}");
                 return Err(AppError::Io(e));
             }
         }
@@ -45,7 +44,7 @@ pub async fn embed_metadata(file_path: &str, metadata: ImageMetadata) -> AppResu
 
     // Check if parent directory is writable
     if let Err(e) = std::fs::metadata(parent) {
-        log::error!("Cannot access parent directory: {}", e);
+        log::error!("Cannot access parent directory: {e}");
         return Err(AppError::Io(e));
     }
 
@@ -272,7 +271,7 @@ fn insert_text_chunk(result: &mut Vec<u8>, keyword: &str, text: &str) -> AppResu
         ));
     }
 
-    let data = format!("{}\0{}", keyword, text);
+    let data = format!("{keyword}\0{text}");
     let data_bytes = data.as_bytes();
     let length = data_bytes.len() as u32;
 
@@ -340,4 +339,320 @@ fn calculate_crc(data: &[u8]) -> u32 {
         crc = CRC_TABLE[table_index] ^ (crc >> 8);
     }
     crc ^ 0xffffffff
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::{AuthorInfo, PlayerInfo, WorldInfo};
+    use crate::test_helpers::{create_minimal_png, create_png_with_metadata};
+
+    // -----------------------------------------------------------------------
+    // create_vrchat_metadata_json tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_create_vrchat_metadata_json_full() {
+        let metadata = ImageMetadata {
+            author: Some(AuthorInfo {
+                display_name: "TestUser".to_string(),
+                id: "usr_test123".to_string(),
+            }),
+            world: Some(WorldInfo {
+                name: "Test World".to_string(),
+                id: "wrld_test456".to_string(),
+                instance_id: "12345~private(usr_test123)".to_string(),
+            }),
+            players: vec![
+                PlayerInfo {
+                    display_name: "Alice".to_string(),
+                    id: "usr_alice".to_string(),
+                },
+                PlayerInfo {
+                    display_name: "Bob".to_string(),
+                    id: "usr_bob".to_string(),
+                },
+            ],
+        };
+
+        let json_str = create_vrchat_metadata_json(&metadata).expect("Should produce valid JSON");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json_str).expect("Output should be valid JSON");
+
+        assert_eq!(parsed["application"], "VRChat Photo Uploader");
+        assert_eq!(parsed["version"], 2);
+        assert!(parsed["created_at"].is_string());
+
+        assert_eq!(parsed["author"]["displayName"], "TestUser");
+        assert_eq!(parsed["author"]["id"], "usr_test123");
+
+        assert_eq!(parsed["world"]["name"], "Test World");
+        assert_eq!(parsed["world"]["id"], "wrld_test456");
+        assert_eq!(parsed["world"]["instanceId"], "12345~private(usr_test123)");
+
+        let players = parsed["players"]
+            .as_array()
+            .expect("players should be array");
+        assert_eq!(players.len(), 2);
+        assert_eq!(players[0]["displayName"], "Alice");
+        assert_eq!(players[1]["displayName"], "Bob");
+    }
+
+    #[test]
+    fn test_create_vrchat_metadata_json_minimal() {
+        let metadata = ImageMetadata {
+            author: None,
+            world: None,
+            players: vec![],
+        };
+
+        let json_str = create_vrchat_metadata_json(&metadata).expect("Should produce valid JSON");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json_str).expect("Output should be valid JSON");
+
+        assert_eq!(parsed["application"], "VRChat Photo Uploader");
+        assert_eq!(parsed["version"], 2);
+        assert!(parsed.get("author").is_none());
+        assert!(parsed.get("world").is_none());
+        assert_eq!(
+            parsed["players"].as_array().unwrap().len(),
+            0,
+            "Empty players should produce empty array"
+        );
+    }
+
+    #[test]
+    fn test_create_vrchat_metadata_json_no_author() {
+        let metadata = ImageMetadata {
+            author: None,
+            world: Some(WorldInfo {
+                name: "Lonely World".to_string(),
+                id: "wrld_lonely".to_string(),
+                instance_id: "1~public".to_string(),
+            }),
+            players: vec![PlayerInfo {
+                display_name: "Solo".to_string(),
+                id: "usr_solo".to_string(),
+            }],
+        };
+
+        let json_str = create_vrchat_metadata_json(&metadata).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert!(parsed.get("author").is_none());
+        assert_eq!(parsed["world"]["name"], "Lonely World");
+        assert_eq!(parsed["players"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_create_vrchat_metadata_json_no_world() {
+        let metadata = ImageMetadata {
+            author: Some(AuthorInfo {
+                display_name: "NoWorld".to_string(),
+                id: "usr_noworld".to_string(),
+            }),
+            world: None,
+            players: vec![],
+        };
+
+        let json_str = create_vrchat_metadata_json(&metadata).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["author"]["displayName"], "NoWorld");
+        assert!(parsed.get("world").is_none());
+    }
+
+    #[test]
+    fn test_create_vrchat_metadata_json_special_characters() {
+        let metadata = ImageMetadata {
+            author: Some(AuthorInfo {
+                display_name: "ユーザー★".to_string(),
+                id: "usr_unicode".to_string(),
+            }),
+            world: Some(WorldInfo {
+                name: "日本語ワールド 🌸".to_string(),
+                id: "wrld_jp".to_string(),
+                instance_id: "42~friends".to_string(),
+            }),
+            players: vec![
+                PlayerInfo {
+                    display_name: "Ñoño".to_string(),
+                    id: "usr_nono".to_string(),
+                },
+                PlayerInfo {
+                    display_name: "O'Brien".to_string(),
+                    id: "usr_obrien".to_string(),
+                },
+                PlayerInfo {
+                    display_name: "name\"with\"quotes".to_string(),
+                    id: "usr_quotes".to_string(),
+                },
+            ],
+        };
+
+        let json_str =
+            create_vrchat_metadata_json(&metadata).expect("Should handle special characters");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json_str).expect("JSON with special chars should parse");
+
+        assert_eq!(parsed["author"]["displayName"], "ユーザー★");
+        assert_eq!(parsed["world"]["name"], "日本語ワールド 🌸");
+        assert_eq!(parsed["players"][0]["displayName"], "Ñoño");
+        assert_eq!(parsed["players"][1]["displayName"], "O'Brien");
+        assert_eq!(parsed["players"][2]["displayName"], "name\"with\"quotes");
+    }
+
+    // -----------------------------------------------------------------------
+    // inject_png_metadata tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_inject_png_metadata_valid_png() {
+        let png = create_minimal_png();
+        let metadata = r#"{"application":"test","version":1}"#;
+
+        let result = inject_png_metadata(&png, metadata);
+        assert!(result.is_ok(), "Should inject metadata into a valid PNG");
+
+        let modified = result.unwrap();
+        // Should still have PNG signature
+        assert_eq!(&modified[..8], &[137, 80, 78, 71, 13, 10, 26, 10]);
+        // Should contain the metadata string
+        let as_str = String::from_utf8_lossy(&modified);
+        assert!(as_str.contains("Description"));
+        assert!(as_str.contains("test"));
+    }
+
+    #[test]
+    fn test_inject_png_metadata_invalid_signature() {
+        let not_a_png = b"this is not a PNG file at all";
+        let result = inject_png_metadata(not_a_png, "metadata");
+        assert!(result.is_err(), "Should reject non-PNG data");
+    }
+
+    #[test]
+    fn test_inject_png_metadata_too_short() {
+        let tiny = vec![137, 80, 78]; // Truncated PNG signature
+        let result = inject_png_metadata(&tiny, "metadata");
+        assert!(result.is_err(), "Should reject data shorter than 8 bytes");
+    }
+
+    #[test]
+    fn test_inject_png_metadata_replaces_existing_description() {
+        // Create a PNG that already has a Description chunk
+        let original_metadata = r#"{"application":"VRCX","version":1,"old":"data"}"#;
+        let png_with_meta = create_png_with_metadata(original_metadata);
+
+        // Verify original metadata is present
+        let original_str = String::from_utf8_lossy(&png_with_meta);
+        assert!(original_str.contains("old"));
+
+        // Inject new metadata
+        let new_metadata = r#"{"application":"VRChat Photo Uploader","version":2,"new":"data"}"#;
+        let result =
+            inject_png_metadata(&png_with_meta, new_metadata).expect("Should inject new metadata");
+
+        let result_str = String::from_utf8_lossy(&result);
+
+        // Old metadata should be gone
+        assert!(
+            !result_str.contains(r#""old":"data""#),
+            "Old Description chunk should be removed"
+        );
+        // New metadata should be present
+        assert!(
+            result_str.contains(r#""new":"data""#),
+            "New metadata should be present"
+        );
+    }
+
+    #[test]
+    fn test_inject_png_metadata_output_is_valid_png() {
+        let png = create_minimal_png();
+        let metadata = r#"{"test":"value"}"#;
+
+        let modified = inject_png_metadata(&png, metadata).expect("Should succeed");
+
+        // The modified data should be parseable by the image crate
+        let img = image::load_from_memory(&modified).expect("Modified PNG should be valid");
+        assert_eq!(img.width(), 1);
+        assert_eq!(img.height(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // insert_text_chunk tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_insert_text_chunk_valid() {
+        let mut buf = Vec::new();
+        let result = insert_text_chunk(&mut buf, "Description", "test data");
+        assert!(result.is_ok());
+
+        // Should have: 4 bytes length + 4 bytes "tEXt" + data + 4 bytes CRC
+        let keyword_and_text = "Description\0test data";
+        let expected_data_len = keyword_and_text.len();
+        let expected_total = 4 + 4 + expected_data_len + 4;
+        assert_eq!(buf.len(), expected_total);
+
+        // Verify chunk type is tEXt
+        assert_eq!(&buf[4..8], b"tEXt");
+
+        // Verify data contains the keyword and text
+        let data_section = &buf[8..8 + expected_data_len];
+        assert!(data_section.starts_with(b"Description\0"));
+        assert!(data_section.ends_with(b"test data"));
+    }
+
+    #[test]
+    fn test_insert_text_chunk_empty_keyword_errors() {
+        let mut buf = Vec::new();
+        let result = insert_text_chunk(&mut buf, "", "some text");
+        assert!(result.is_err(), "Empty keyword should be rejected");
+    }
+
+    #[test]
+    fn test_insert_text_chunk_keyword_too_long_errors() {
+        let mut buf = Vec::new();
+        let long_keyword = "a".repeat(80); // PNG spec: max 79 bytes
+        let result = insert_text_chunk(&mut buf, &long_keyword, "text");
+        assert!(result.is_err(), "Keyword over 79 bytes should be rejected");
+    }
+
+    #[test]
+    fn test_insert_text_chunk_max_keyword_length() {
+        let mut buf = Vec::new();
+        let keyword_79 = "a".repeat(79); // Exactly at the limit
+        let result = insert_text_chunk(&mut buf, &keyword_79, "text");
+        assert!(
+            result.is_ok(),
+            "Keyword of exactly 79 bytes should be accepted"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // calculate_crc tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_calculate_crc_empty() {
+        let crc = calculate_crc(&[]);
+        // CRC-32 of empty data should be 0x00000000
+        assert_eq!(crc, 0x00000000);
+    }
+
+    #[test]
+    fn test_calculate_crc_known_value() {
+        // CRC-32 of "IEND" (PNG IEND chunk type) is a well-known value
+        let crc = calculate_crc(b"IEND");
+        assert_eq!(crc, 0xAE426082, "CRC of IEND should match known value");
+    }
+
+    #[test]
+    fn test_calculate_crc_deterministic() {
+        let data = b"tEXtDescription\0some metadata";
+        let crc1 = calculate_crc(data);
+        let crc2 = calculate_crc(data);
+        assert_eq!(crc1, crc2, "Same input should always produce same CRC");
+    }
 }

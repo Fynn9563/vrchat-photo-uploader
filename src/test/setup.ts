@@ -3,16 +3,18 @@ import { vi } from 'vitest';
 // Mock Tauri API
 const mockTauri = {
   invoke: vi.fn(),
+  convertFileSrc: vi.fn((path: string) => `asset://localhost/${encodeURIComponent(path)}`),
   listen: vi.fn(),
   emit: vi.fn(),
   open: vi.fn(),
-  readBinaryFile: vi.fn(),
-  getVersion: vi.fn(() => Promise.resolve('2.0.10')),
+  readFile: vi.fn(),
+  getVersion: vi.fn(() => Promise.resolve('4.0.0')),
 };
 
-// Mock @tauri-apps/api modules
-vi.mock('@tauri-apps/api/tauri', () => ({
+// Mock @tauri-apps/api modules (Tauri v2 paths)
+vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockTauri.invoke,
+  convertFileSrc: mockTauri.convertFileSrc,
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -20,16 +22,23 @@ vi.mock('@tauri-apps/api/event', () => ({
   emit: mockTauri.emit,
 }));
 
-vi.mock('@tauri-apps/api/dialog', () => ({
+vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: mockTauri.open,
 }));
 
-vi.mock('@tauri-apps/api/fs', () => ({
-  readBinaryFile: mockTauri.readBinaryFile,
+vi.mock('@tauri-apps/plugin-fs', () => ({
+  readFile: mockTauri.readFile,
 }));
 
 vi.mock('@tauri-apps/api/app', () => ({
   getVersion: mockTauri.getVersion,
+}));
+
+vi.mock('@tauri-apps/api/webviewWindow', () => ({
+  getCurrentWebviewWindow: vi.fn(() => ({
+    listen: mockTauri.listen,
+    onCloseRequested: vi.fn(),
+  })),
 }));
 
 // Mock browser APIs

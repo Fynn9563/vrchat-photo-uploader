@@ -4,7 +4,7 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::errors::{AppError, AppResult, ProgressState};
 use crate::{config, database, uploader};
@@ -16,6 +16,12 @@ pub struct BackgroundWatcher {
     last_activity: Arc<Mutex<Option<Instant>>>,
     batch_active: Arc<std::sync::atomic::AtomicBool>,
     start_time: std::time::SystemTime,
+}
+
+impl Default for BackgroundWatcher {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BackgroundWatcher {
@@ -39,17 +45,17 @@ impl BackgroundWatcher {
 
         // Create watcher
         let mut watcher = RecommendedWatcher::new(tx, Config::default())
-            .map_err(|e| format!("Failed to create watcher: {}", e))?;
+            .map_err(|e| format!("Failed to create watcher: {e}"))?;
 
         let root_path = Path::new(&path_str);
         if !root_path.exists() {
-            return Err(format!("Directory does not exist: {}", path_str));
+            return Err(format!("Directory does not exist: {path_str}"));
         }
 
         // Watch root directory
         watcher
             .watch(root_path, RecursiveMode::Recursive)
-            .map_err(|e| format!("Failed to watch root directory: {}", e))?;
+            .map_err(|e| format!("Failed to watch root directory: {e}"))?;
 
         // Explicitly watch current month folder if it exists (extra robust for NAS)
         let now = chrono::Local::now();
@@ -63,7 +69,7 @@ impl BackgroundWatcher {
         self.watcher = Some(watcher);
         self.path = Some(path_str.clone());
 
-        log::info!("Background watcher started on: {}", path_str);
+        log::info!("Background watcher started on: {path_str}");
 
         let handle_clone = app_handle.clone();
         let pending_files = self.pending_files.clone();
@@ -96,8 +102,7 @@ impl BackgroundWatcher {
                                         // Check if file is in an ignored folder
                                         if is_in_ignored_folder(&path_str, &ignored_folders) {
                                             log::debug!(
-                                                "Ignoring file in ignored folder: {}",
-                                                path_str
+                                                "Ignoring file in ignored folder: {path_str}"
                                             );
                                             continue;
                                         }
@@ -109,12 +114,12 @@ impl BackgroundWatcher {
                                                 .or_else(|_| meta.modified())
                                                 .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                                             if file_time < start_time {
-                                                log::debug!("Ignoring old file: {}", path_str);
+                                                log::debug!("Ignoring old file: {path_str}");
                                                 continue;
                                             }
                                         }
 
-                                        log::info!("Detected file for auto-upload: {}", path_str);
+                                        log::info!("Detected file for auto-upload: {path_str}");
 
                                         // Add to pending
                                         if let Ok(mut q) = pending.lock() {
@@ -143,7 +148,7 @@ impl BackgroundWatcher {
                             });
                         }
                     }
-                    Err(e) => log::error!("Watch error: {:?}", e),
+                    Err(e) => log::error!("Watch error: {e:?}"),
                 }
             }
         });
@@ -153,7 +158,7 @@ impl BackgroundWatcher {
 
     pub fn stop(&mut self) {
         if let Some(path) = &self.path {
-            log::info!("Stopping background watcher on: {}", path);
+            log::info!("Stopping background watcher on: {path}");
         }
         self.watcher = None;
         self.path = None;
@@ -207,7 +212,7 @@ fn start_batch_monitor(
                     let month_path = root_path.join(&month_folder);
 
                     if month_path.exists() {
-                        log::debug!("Periodic scan: month folder {} exists", month_folder);
+                        log::debug!("Periodic scan: month folder {month_folder} exists");
                         // We can't easily re-add to the watcher here without access to it,
                         // but we can manually scan for files that might have been missed
                         if let Ok(entries) = std::fs::read_dir(&month_path) {
@@ -240,8 +245,7 @@ fn start_batch_monitor(
                                             if let Ok(mut q) = pending_files.lock() {
                                                 if !q.contains(&path_str) {
                                                     log::info!(
-                                                        "Found missed file via scan: {}",
-                                                        path_str
+                                                        "Found missed file via scan: {path_str}"
                                                     );
                                                     q.push(path_str);
                                                     if let Ok(mut t) = last_activity.lock() {
@@ -294,7 +298,7 @@ fn start_batch_monitor(
                         Ok(session_id) => {
                             // Sequential: Wait for this session to finish before monitor exits
                             // This ensures we don't spawn multiple concurrent auto-upload sessions
-                            log::info!("Monitoring auto-upload session {}...", session_id);
+                            log::info!("Monitoring auto-upload session {session_id}...");
                             loop {
                                 tokio::time::sleep(Duration::from_secs(2)).await;
                                 let is_active = {
@@ -309,7 +313,7 @@ fn start_batch_monitor(
                                     }
                                 };
                                 if !is_active {
-                                    log::info!("Auto-upload session {} completed.", session_id);
+                                    log::info!("Auto-upload session {session_id} completed.");
                                     break;
                                 }
 
@@ -326,17 +330,17 @@ fn start_batch_monitor(
                                             {
                                                 session_progress.session_status =
                                                     "cancelled".to_string();
-                                                log::info!("Background session {} cancelled due to auto-upload being disabled", session_id);
+                                                log::info!("Background session {session_id} cancelled due to auto-upload being disabled");
                                             }
                                         }
                                     }
                                     // Emit cancellation event
-                                    app_handle.emit_all("upload-cancelled", &session_id).ok();
+                                    app_handle.emit("upload-cancelled", &session_id).ok();
                                     break;
                                 }
                             }
                         }
-                        Err(e) => log::error!("Batch auto-upload failed: {}", e),
+                        Err(e) => log::error!("Batch auto-upload failed: {e}"),
                     }
                 }
 
@@ -359,11 +363,7 @@ fn is_new_image_event(event: &Event) -> bool {
     // 1. New files created (Create)
     // 2. Files finished being written/moved (Modify)
     // 3. Files renamed/moved (Modify(Name))
-    match event.kind {
-        EventKind::Create(_) => true,
-        EventKind::Modify(_) => true,
-        _ => false,
-    }
+    matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_))
 }
 
 fn is_image_file(path: &str) -> bool {
@@ -443,10 +443,7 @@ async fn process_auto_upload_batch(
                 valid_paths.push(path);
             }
             Err(e) => {
-                log::warn!(
-                    "Failed to check if file is processed: {}. Proceeding anyway.",
-                    e
-                );
+                log::warn!("Failed to check if file is processed: {e}. Proceeding anyway.");
                 valid_paths.push(path);
             }
         }
@@ -504,4 +501,139 @@ async fn process_auto_upload_batch(
     );
 
     uploader::SessionManager::start_session(app_handle, options).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- is_image_file tests ---
+
+    #[test]
+    fn test_is_image_png() {
+        assert!(is_image_file("photo.png"));
+    }
+
+    #[test]
+    fn test_is_image_jpg() {
+        assert!(is_image_file("photo.jpg"));
+    }
+
+    #[test]
+    fn test_is_image_jpeg() {
+        assert!(is_image_file("photo.jpeg"));
+    }
+
+    #[test]
+    fn test_is_image_webp() {
+        assert!(is_image_file("photo.webp"));
+    }
+
+    #[test]
+    fn test_is_image_avif() {
+        assert!(is_image_file("photo.avif"));
+    }
+
+    #[test]
+    fn test_is_not_image_txt() {
+        assert!(!is_image_file("readme.txt"));
+    }
+
+    #[test]
+    fn test_is_not_image_exe() {
+        assert!(!is_image_file("program.exe"));
+    }
+
+    #[test]
+    fn test_is_not_image_mp4() {
+        assert!(!is_image_file("video.mp4"));
+    }
+
+    #[test]
+    fn test_is_image_case_insensitive() {
+        assert!(is_image_file("PHOTO.PNG"));
+        assert!(is_image_file("Photo.Jpg"));
+        assert!(is_image_file("image.WEBP"));
+    }
+
+    #[test]
+    fn test_is_not_image_no_extension() {
+        assert!(!is_image_file("filename"));
+    }
+
+    #[test]
+    fn test_is_image_with_path() {
+        assert!(is_image_file("/home/user/photos/image.png"));
+        assert!(is_image_file("C:\\Users\\test\\photo.jpg"));
+    }
+
+    // --- is_in_ignored_folder tests ---
+
+    #[test]
+    fn test_ignored_empty_list() {
+        assert!(!is_in_ignored_folder("/home/photos/image.png", &[]));
+    }
+
+    #[test]
+    fn test_ignored_match() {
+        let ignored = vec!["Thumbnails".to_string()];
+        assert!(is_in_ignored_folder(
+            "/home/photos/Thumbnails/image.png",
+            &ignored
+        ));
+    }
+
+    #[test]
+    fn test_ignored_case_insensitive() {
+        let ignored = vec!["thumbnails".to_string()];
+        assert!(is_in_ignored_folder(
+            "/home/photos/THUMBNAILS/image.png",
+            &ignored
+        ));
+    }
+
+    #[test]
+    fn test_ignored_no_match() {
+        let ignored = vec!["Thumbnails".to_string()];
+        assert!(!is_in_ignored_folder(
+            "/home/photos/FullSize/image.png",
+            &ignored
+        ));
+    }
+
+    #[test]
+    fn test_ignored_nested_path() {
+        let ignored = vec!["temp".to_string()];
+        assert!(is_in_ignored_folder(
+            "/home/photos/2024/temp/image.png",
+            &ignored
+        ));
+    }
+
+    #[test]
+    fn test_ignored_partial_name_no_match() {
+        let ignored = vec!["temp".to_string()];
+        // "temporary" contains "temp" but is a different folder name - should NOT match
+        assert!(!is_in_ignored_folder(
+            "/home/photos/temporary/image.png",
+            &ignored
+        ));
+    }
+
+    #[test]
+    fn test_ignored_multiple_folders() {
+        let ignored = vec![
+            "temp".to_string(),
+            "cache".to_string(),
+            "Thumbnails".to_string(),
+        ];
+        assert!(is_in_ignored_folder(
+            "/home/photos/cache/image.png",
+            &ignored
+        ));
+        assert!(!is_in_ignored_folder(
+            "/home/photos/originals/image.png",
+            &ignored
+        ));
+    }
 }

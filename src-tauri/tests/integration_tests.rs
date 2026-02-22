@@ -43,55 +43,41 @@ async fn test_full_image_processing_workflow() {
         // Verify results
         match validation_result {
             Ok(_) => println!("✅ File validation passed"),
-            Err(e) => println!(
-                "⚠️  File validation failed: {} (acceptable for minimal PNG)",
-                e
-            ),
+            Err(e) => println!("⚠️  File validation failed: {e} (acceptable for minimal PNG)"),
         }
 
         match compression_result {
             Ok(needs_compression) => {
-                println!(
-                    "✅ Compression check passed: needs_compression = {}",
-                    needs_compression
-                );
+                println!("✅ Compression check passed: needs_compression = {needs_compression}");
                 assert!(
                     !needs_compression,
                     "Small test image should not need compression"
                 );
             }
-            Err(e) => println!(
-                "⚠️  Compression check failed: {} (might be due to image validation)",
-                e
-            ),
+            Err(e) => {
+                println!("⚠️  Compression check failed: {e} (might be due to image validation)")
+            }
         }
 
         match info_result {
             Ok((width, height, size)) => {
-                println!(
-                    "✅ Image info extracted: {}x{}, {} bytes",
-                    width, height, size
-                );
+                println!("✅ Image info extracted: {width}x{height}, {size} bytes");
                 assert_eq!(width, 1, "Test image should be 1 pixel wide");
                 assert_eq!(height, 1, "Test image should be 1 pixel tall");
             }
-            Err(e) => println!(
-                "⚠️  Image info extraction failed: {} (acceptable for minimal PNG)",
-                e
-            ),
+            Err(e) => {
+                println!("⚠️  Image info extraction failed: {e} (acceptable for minimal PNG)")
+            }
         }
 
         match metadata_result {
             Ok(Some(metadata)) => {
-                println!("✅ Metadata extracted: {:?}", metadata);
+                println!("✅ Metadata extracted: {metadata:?}");
             }
             Ok(None) => {
                 println!("✅ No metadata found (expected for test image)");
             }
-            Err(e) => println!(
-                "⚠️  Metadata extraction failed: {} (expected for test image)",
-                e
-            ),
+            Err(e) => println!("⚠️  Metadata extraction failed: {e} (expected for test image)"),
         }
     } else {
         panic!("Failed to create test file");
@@ -180,7 +166,7 @@ fn test_error_handling_integration() {
             println!("✅ Correct error type for invalid webhook");
         }
         Err(other) => {
-            println!("⚠️  Got different error type: {:?}", other);
+            println!("⚠️  Got different error type: {other:?}");
         }
         Ok(_) => panic!("Should have failed"),
     }
@@ -213,9 +199,9 @@ async fn test_async_operations_integration() {
         // All operations should complete without panic
         match (sync_validation, async_metadata, sync_compression) {
             (Ok(_), Ok(_), Ok(_)) => println!("✅ All async/sync operations succeeded"),
-            (Ok(_), Ok(_), Err(e)) => println!("⚠️  Sync compression failed: {}", e),
-            (Ok(_), Err(e), Ok(_)) => println!("⚠️  Async metadata failed: {}", e),
-            (Err(e), Ok(_), Ok(_)) => println!("⚠️  Sync validation failed: {}", e),
+            (Ok(_), Ok(_), Err(e)) => println!("⚠️  Sync compression failed: {e}"),
+            (Ok(_), Err(e), Ok(_)) => println!("⚠️  Async metadata failed: {e}"),
+            (Err(e), Ok(_), Ok(_)) => println!("⚠️  Sync validation failed: {e}"),
             _ => println!("⚠️  Multiple operations failed (acceptable for minimal test PNG)"),
         }
     }

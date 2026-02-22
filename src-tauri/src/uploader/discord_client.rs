@@ -72,8 +72,8 @@ impl DiscordClient {
 
             // Add thread_id as query parameter if provided
             if let Some(tid) = thread_id {
-                url_parts.push(format!("thread_id={}", tid));
-                log::info!("🔗 Adding thread_id to URL query: {}", tid);
+                url_parts.push(format!("thread_id={tid}"));
+                log::info!("🔗 Adding thread_id to URL query: {tid}");
             }
 
             let final_url = if webhook_url.contains('?') {
@@ -82,7 +82,7 @@ impl DiscordClient {
                 format!("{}?{}", webhook_url, url_parts.join("&"))
             };
 
-            log::debug!("Final webhook URL: {}", final_url);
+            log::debug!("Final webhook URL: {final_url}");
 
             let response = self.client.post(&final_url).multipart(form).send().await?;
 
@@ -126,12 +126,7 @@ impl DiscordClient {
                     self.calculate_backoff_delay(attempt)
                 };
 
-                log::warn!(
-                    "Upload attempt {} failed, retrying in {:?}: {}",
-                    attempt,
-                    delay,
-                    error
-                );
+                log::warn!("Upload attempt {attempt} failed, retrying in {delay:?}: {error}");
                 sleep(delay).await;
                 continue;
             }
@@ -154,9 +149,9 @@ impl DiscordClient {
 
         loop {
             let final_url = if webhook_url.contains('?') {
-                format!("{}&wait=true", webhook_url)
+                format!("{webhook_url}&wait=true")
             } else {
-                format!("{}?wait=true", webhook_url)
+                format!("{webhook_url}?wait=true")
             };
 
             // Build JSON body with thread_name for forum channels
@@ -184,10 +179,7 @@ impl DiscordClient {
 
             if status.is_success() {
                 let response_text = response.text().await?;
-                log::info!(
-                    "✅ Forum text message sent successfully. Response: {}",
-                    response_text
-                );
+                log::info!("✅ Forum text message sent successfully. Response: {response_text}");
                 return Ok(response_text);
             }
 
@@ -197,9 +189,7 @@ impl DiscordClient {
                 .unwrap_or_else(|_| "Unknown error".to_string());
 
             log::error!(
-                "❌ Failed to send forum text message. Status: {}, Error: {}",
-                status,
-                error_text
+                "❌ Failed to send forum text message. Status: {status}, Error: {error_text}"
             );
 
             attempt += 1;
@@ -211,11 +201,7 @@ impl DiscordClient {
                     self.calculate_backoff_delay(attempt)
                 };
 
-                log::warn!(
-                    "Forum text message attempt {} failed, retrying in {:?}",
-                    attempt,
-                    delay
-                );
+                log::warn!("Forum text message attempt {attempt} failed, retrying in {delay:?}");
                 sleep(delay).await;
                 continue;
             }
@@ -246,7 +232,7 @@ impl DiscordClient {
             url_parts.push("wait=true".to_string());
 
             if let Some(tid) = thread_id {
-                url_parts.push(format!("thread_id={}", tid));
+                url_parts.push(format!("thread_id={tid}"));
             }
 
             let final_url = if webhook_url.contains('?') {
@@ -290,11 +276,7 @@ impl DiscordClient {
                     self.calculate_backoff_delay(attempt)
                 };
 
-                log::warn!(
-                    "Text message attempt {} failed, retrying in {:?}",
-                    attempt,
-                    delay
-                );
+                log::warn!("Text message attempt {attempt} failed, retrying in {delay:?}");
                 sleep(delay).await;
                 continue;
             }
@@ -328,7 +310,7 @@ impl DiscordClient {
                     }
                 }
                 Err(e) => {
-                    log::warn!("Failed to acquire rate limiter lock (non-critical): {}", e);
+                    log::warn!("Failed to acquire rate limiter lock (non-critical): {e}");
                     None
                 }
             }
@@ -345,7 +327,7 @@ impl DiscordClient {
                 rate_limiter.insert(webhook_id.to_string(), Instant::now());
             }
             Err(e) => {
-                log::warn!("Failed to update rate limiter (non-critical): {}", e);
+                log::warn!("Failed to update rate limiter (non-critical): {e}");
             }
         }
     }
@@ -463,7 +445,7 @@ fn parse_discord_error_message(error_text: &str, status_code: u16) -> String {
                 50035 => {
                     // Invalid form body - could be various issues
                     if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
-                        return format!("Discord rejected the request: {}", message);
+                        return format!("Discord rejected the request: {message}");
                     }
                 }
                 50006 => {
@@ -479,7 +461,7 @@ fn parse_discord_error_message(error_text: &str, status_code: u16) -> String {
                 _ => {
                     // Include the Discord error code in the message for debugging
                     if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
-                        return format!("Discord error (code {}): {}", code, message);
+                        return format!("Discord error (code {code}): {message}");
                     }
                 }
             }
@@ -487,12 +469,12 @@ fn parse_discord_error_message(error_text: &str, status_code: u16) -> String {
 
         // If we have a message but no code
         if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
-            return format!("Discord error: {}", message);
+            return format!("Discord error: {message}");
         }
     }
 
     // Fallback to generic message with status code
-    format!("Discord API error {}: {}", status_code, error_text)
+    format!("Discord API error {status_code}: {error_text}")
 }
 
 /// Extract thread ID from Discord response
@@ -514,18 +496,18 @@ pub fn extract_thread_id(response_data: &str) -> Option<String> {
     let json: serde_json::Value = match serde_json::from_str(response_data) {
         Ok(v) => v,
         Err(e) => {
-            log::error!("❌ Failed to parse Discord response as JSON: {}", e);
+            log::error!("❌ Failed to parse Discord response as JSON: {e}");
             return None;
         }
     };
 
-    log::debug!("✅ Successfully parsed Discord response as JSON: {}", json);
+    log::debug!("✅ Successfully parsed Discord response as JSON: {json}");
 
     // 1. Check object type (10, 11, 12 are threads)
     if let Some(t) = json.get("type").and_then(|v| v.as_u64()) {
         if t == 10 || t == 11 || t == 12 {
             if let Some(id) = json.get("id").and_then(|v| v.as_str()) {
-                log::info!("🎉 Extracted thread_id from Thread Object 'id': {}", id);
+                log::info!("🎉 Extracted thread_id from Thread Object 'id': {id}");
                 return Some(id.to_string());
             }
         }
@@ -533,19 +515,355 @@ pub fn extract_thread_id(response_data: &str) -> Option<String> {
 
     // 2. Try 'channel_id' (common for forum message responses)
     if let Some(channel_id) = json.get("channel_id").and_then(|v| v.as_str()) {
-        log::info!(
-            "🎉 Extracted thread_id from 'channel_id' field: {}",
-            channel_id
-        );
+        log::info!("🎉 Extracted thread_id from 'channel_id' field: {channel_id}");
         return Some(channel_id.to_string());
     }
 
     // 3. Fallback to 'id' (might be thread ID or message ID)
     if let Some(id) = json.get("id").and_then(|v| v.as_str()) {
-        log::info!("🎉 Extracted thread_id from 'id' field (fallback): {}", id);
+        log::info!("🎉 Extracted thread_id from 'id' field (fallback): {id}");
         return Some(id.to_string());
     }
 
     log::error!("❌ Could not extract thread_id from any expected fields (channel_id, id)");
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- parse_discord_error_message tests ---
+
+    #[test]
+    fn test_parse_error_code_220003_forum_channel() {
+        // Code 220003 = not a forum channel
+        let error = r#"{"code": 220003, "message": "Thread must be a forum channel"}"#;
+        let result = parse_discord_error_message(error, 400);
+        assert!(
+            result.contains("Forum channel"),
+            "Should mention forum channel: {result}"
+        );
+    }
+
+    #[test]
+    fn test_parse_error_code_40005_too_large() {
+        let error = r#"{"code": 40005, "message": "Request entity too large"}"#;
+        let result = parse_discord_error_message(error, 413);
+        assert!(
+            result.contains("40005"),
+            "Should contain error code: {result}"
+        );
+        assert!(
+            result.contains("too large"),
+            "Should mention too large: {result}"
+        );
+    }
+
+    #[test]
+    fn test_parse_error_code_50035_invalid_form() {
+        let error = r#"{"code": 50035, "message": "Invalid Form Body"}"#;
+        let result = parse_discord_error_message(error, 400);
+        assert!(
+            result.contains("Invalid Form Body"),
+            "Should contain message: {result}"
+        );
+    }
+
+    #[test]
+    fn test_parse_error_code_50006_empty_message() {
+        let error = r#"{"code": 50006, "message": "Cannot send empty message"}"#;
+        let result = parse_discord_error_message(error, 400);
+        assert!(
+            result.contains("empty message"),
+            "Should mention empty: {result}"
+        );
+    }
+
+    #[test]
+    fn test_parse_error_code_50013_missing_permissions() {
+        let error = r#"{"code": 50013, "message": "Missing permissions"}"#;
+        let result = parse_discord_error_message(error, 403);
+        assert!(
+            result.contains("permission"),
+            "Should mention permissions: {result}"
+        );
+    }
+
+    #[test]
+    fn test_parse_error_code_10015_unknown_webhook() {
+        let error = r#"{"code": 10015, "message": "Unknown Webhook"}"#;
+        let result = parse_discord_error_message(error, 404);
+        assert!(
+            result.contains("webhook") || result.contains("Webhook"),
+            "Should mention webhook: {result}"
+        );
+    }
+
+    #[test]
+    fn test_parse_error_unknown_code_with_message() {
+        let error = r#"{"code": 99999, "message": "Something weird happened"}"#;
+        let result = parse_discord_error_message(error, 400);
+        assert!(result.contains("99999"), "Should contain code: {result}");
+        assert!(
+            result.contains("Something weird happened"),
+            "Should contain message: {result}"
+        );
+    }
+
+    #[test]
+    fn test_parse_error_no_code_with_message() {
+        let error = r#"{"message": "An error occurred"}"#;
+        let result = parse_discord_error_message(error, 500);
+        assert!(
+            result.contains("An error occurred"),
+            "Should contain message: {result}"
+        );
+    }
+
+    #[test]
+    fn test_parse_error_invalid_json() {
+        let error = "not json at all";
+        let result = parse_discord_error_message(error, 500);
+        assert!(
+            result.contains("500"),
+            "Should contain status code: {result}"
+        );
+        assert!(
+            result.contains("not json at all"),
+            "Should contain raw text: {result}"
+        );
+    }
+
+    #[test]
+    fn test_parse_error_empty_text() {
+        let result = parse_discord_error_message("", 404);
+        assert!(
+            result.contains("404"),
+            "Should contain status code: {result}"
+        );
+    }
+
+    // --- should_retry_error tests ---
+
+    #[test]
+    fn test_should_retry_429_rate_limit() {
+        assert!(should_retry_error(429));
+    }
+
+    #[test]
+    fn test_should_retry_500_server_error() {
+        assert!(should_retry_error(500));
+    }
+
+    #[test]
+    fn test_should_retry_502_bad_gateway() {
+        assert!(should_retry_error(502));
+    }
+
+    #[test]
+    fn test_should_retry_503_unavailable() {
+        assert!(should_retry_error(503));
+    }
+
+    #[test]
+    fn test_should_retry_504_timeout() {
+        assert!(should_retry_error(504));
+    }
+
+    #[test]
+    fn test_should_not_retry_400() {
+        assert!(!should_retry_error(400));
+    }
+
+    #[test]
+    fn test_should_not_retry_401() {
+        assert!(!should_retry_error(401));
+    }
+
+    #[test]
+    fn test_should_not_retry_403() {
+        assert!(!should_retry_error(403));
+    }
+
+    #[test]
+    fn test_should_not_retry_404() {
+        assert!(!should_retry_error(404));
+    }
+
+    // --- extract_thread_id tests ---
+
+    #[test]
+    fn test_extract_thread_id_from_channel_id() {
+        let response = r#"{"id": "msg123", "channel_id": "thread456"}"#;
+        let result = extract_thread_id(response);
+        assert_eq!(result, Some("thread456".to_string()));
+    }
+
+    #[test]
+    fn test_extract_thread_id_from_thread_type_11() {
+        let response = r#"{"id": "thread789", "type": 11}"#;
+        let result = extract_thread_id(response);
+        assert_eq!(result, Some("thread789".to_string()));
+    }
+
+    #[test]
+    fn test_extract_thread_id_from_thread_type_12() {
+        let response = r#"{"id": "thread101", "type": 12}"#;
+        let result = extract_thread_id(response);
+        assert_eq!(result, Some("thread101".to_string()));
+    }
+
+    #[test]
+    fn test_extract_thread_id_from_thread_type_10() {
+        let response = r#"{"id": "thread202", "type": 10}"#;
+        let result = extract_thread_id(response);
+        assert_eq!(result, Some("thread202".to_string()));
+    }
+
+    #[test]
+    fn test_extract_thread_id_fallback_to_id() {
+        // No channel_id, no thread type - falls back to id
+        let response = r#"{"id": "fallback_id"}"#;
+        let result = extract_thread_id(response);
+        assert_eq!(result, Some("fallback_id".to_string()));
+    }
+
+    #[test]
+    fn test_extract_thread_id_empty_response() {
+        let result = extract_thread_id("");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_thread_id_invalid_json() {
+        let result = extract_thread_id("not json");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_thread_id_no_id_fields() {
+        let response = r#"{"content": "hello"}"#;
+        let result = extract_thread_id(response);
+        assert_eq!(result, None);
+    }
+
+    // --- DiscordClient method tests ---
+
+    #[test]
+    fn test_extract_webhook_id_standard_url() {
+        let client = DiscordClient::new();
+        let id = client.extract_webhook_id("https://discord.com/api/webhooks/123456/abcdef");
+        assert_eq!(id, "123456");
+    }
+
+    #[test]
+    fn test_extract_webhook_id_with_query_params() {
+        let client = DiscordClient::new();
+        // nth_back(1) on split('/') for URL with trailing path still works
+        let id = client.extract_webhook_id("https://discord.com/api/webhooks/789/token");
+        assert_eq!(id, "789");
+    }
+
+    #[test]
+    fn test_extract_webhook_id_short_url() {
+        let client = DiscordClient::new();
+        let id = client.extract_webhook_id("https://example.com/hook");
+        // nth_back(1) should get "example.com" or similar
+        assert!(!id.is_empty());
+    }
+
+    #[test]
+    fn test_calculate_backoff_attempt_1() {
+        let client = DiscordClient::new();
+        let delay = client.calculate_backoff_delay(1);
+        // base_delay=1000ms * 2^0 = 1000ms
+        assert_eq!(delay, Duration::from_millis(1000));
+    }
+
+    #[test]
+    fn test_calculate_backoff_attempt_2() {
+        let client = DiscordClient::new();
+        let delay = client.calculate_backoff_delay(2);
+        // base_delay=1000ms * 2^1 = 2000ms
+        assert_eq!(delay, Duration::from_millis(2000));
+    }
+
+    #[test]
+    fn test_calculate_backoff_attempt_3() {
+        let client = DiscordClient::new();
+        let delay = client.calculate_backoff_delay(3);
+        // base_delay=1000ms * 2^2 = 4000ms
+        assert_eq!(delay, Duration::from_millis(4000));
+    }
+
+    #[test]
+    fn test_calculate_backoff_clamps_to_max() {
+        let client = DiscordClient::new();
+        // Very high attempt should clamp to max_delay (120s)
+        let delay = client.calculate_backoff_delay(30);
+        assert_eq!(delay, Duration::from_secs(120));
+    }
+
+    #[test]
+    fn test_extract_retry_after_valid() {
+        let client = DiscordClient::new();
+        let error = r#"{"retry_after": 1.5, "message": "rate limited"}"#;
+        let result = client.extract_retry_after(error);
+        assert!(result.is_some());
+        let duration = result.unwrap();
+        assert_eq!(duration, Duration::from_secs_f64(1.5));
+    }
+
+    #[test]
+    fn test_extract_retry_after_missing_field() {
+        let client = DiscordClient::new();
+        let error = r#"{"message": "some error"}"#;
+        let result = client.extract_retry_after(error);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_retry_after_invalid_number() {
+        let client = DiscordClient::new();
+        let error = r#"{"retry_after": "not_a_number", "message": "error"}"#;
+        let result = client.extract_retry_after(error);
+        // The current implementation looks for text parsing, may or may not work
+        // Just verify it doesn't panic
+        let _ = result;
+    }
+
+    // --- UploadPayload tests ---
+
+    #[test]
+    fn test_upload_payload_new_is_empty() {
+        let payload = UploadPayload::new();
+        assert!(payload.files.is_empty());
+        assert!(payload.text_fields.is_empty());
+    }
+
+    #[test]
+    fn test_upload_payload_add_text_field() {
+        let mut payload = UploadPayload::new();
+        payload.add_text_field("content".to_string(), "Hello world".to_string());
+        assert_eq!(
+            payload.text_fields.get("content"),
+            Some(&"Hello world".to_string())
+        );
+    }
+
+    #[test]
+    fn test_upload_payload_build_form_empty() {
+        let payload = UploadPayload::new();
+        let result = payload.build_form();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_upload_payload_build_form_with_text() {
+        let mut payload = UploadPayload::new();
+        payload.add_text_field("content".to_string(), "test message".to_string());
+        let result = payload.build_form();
+        assert!(result.is_ok());
+    }
 }

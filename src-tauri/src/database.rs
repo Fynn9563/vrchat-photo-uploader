@@ -26,16 +26,15 @@ pub async fn init_database() -> AppResult<()> {
             log::info!("Directory write permissions verified");
         }
         Err(e) => {
-            log::error!("Cannot write to database directory: {}", e);
+            log::error!("Cannot write to database directory: {e}");
             return Err(AppError::Config(format!(
-                "No write permissions for database directory: {}",
-                e
+                "No write permissions for database directory: {e}"
             )));
         }
     }
 
     let database_url = format!("sqlite:{}", db_path.display());
-    log::info!("Connecting to database: {}", database_url);
+    log::info!("Connecting to database: {database_url}");
 
     // Try to create the file first if it doesn't exist
     if !db_path.exists() {
@@ -48,10 +47,9 @@ pub async fn init_database() -> AppResult<()> {
                 log::info!("Database file created successfully");
             }
             Err(e) => {
-                log::error!("Failed to create database file: {}", e);
+                log::error!("Failed to create database file: {e}");
                 return Err(AppError::Config(format!(
-                    "Cannot create database file: {}",
-                    e
+                    "Cannot create database file: {e}"
                 )));
             }
         }
@@ -74,7 +72,7 @@ pub async fn init_database() -> AppResult<()> {
         log::info!("Connection attempt {}: {}", i + 1, url);
         match SqlitePool::connect(url).await {
             Ok(p) => {
-                log::info!("Successfully connected with URL: {}", url);
+                log::info!("Successfully connected with URL: {url}");
                 pool = Some(p);
                 break;
             }
@@ -93,7 +91,7 @@ pub async fn init_database() -> AppResult<()> {
                 .map(|e| e.to_string())
                 .unwrap_or_else(|| "Unknown error".to_string())
         );
-        log::error!("{}", error_msg);
+        log::error!("{error_msg}");
         AppError::Config(error_msg)
     })?;
 
@@ -349,7 +347,7 @@ pub async fn insert_webhook(name: String, url: String, is_forum: bool) -> AppRes
     match result {
         Ok(result) => {
             let webhook_id = result.last_insert_rowid();
-            log::info!("Added webhook: {} (ID: {})", name, webhook_id);
+            log::info!("Added webhook: {name} (ID: {webhook_id})");
             Ok(webhook_id)
         }
         Err(sqlx::Error::Database(db_err))
@@ -390,7 +388,7 @@ pub async fn delete_webhook(id: i64) -> AppResult<()> {
         return Err(AppError::Database(sqlx::Error::RowNotFound));
     }
 
-    log::info!("Deleted webhook with id: {}", id);
+    log::info!("Deleted webhook with id: {id}");
     Ok(())
 }
 

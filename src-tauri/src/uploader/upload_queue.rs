@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
-use tauri::Manager;
+use tauri::Emitter;
 use tokio::time::{sleep, Duration, Instant};
 
 use crate::commands::Webhook;
@@ -32,12 +32,8 @@ pub async fn process_upload_queue(
 ) {
     let client = DiscordClient::new();
 
-    log::info!("Starting upload session {}", session_id);
-    log::info!(
-        "Single Thread Mode: {}, Merge No Metadata: {}",
-        single_thread_mode,
-        merge_no_metadata
-    );
+    log::info!("Starting upload session {session_id}");
+    log::info!("Single Thread Mode: {single_thread_mode}, Merge No Metadata: {merge_no_metadata}");
 
     // Initial progress update
     update_progress(
@@ -70,10 +66,7 @@ pub async fn process_upload_queue(
 
     // Initial cancellation check
     if is_session_cancelled(&progress_state, &session_id) {
-        log::info!(
-            "Session {} was cancelled before processing started",
-            session_id
-        );
+        log::info!("Session {session_id} was cancelled before processing started");
         mark_session_cancelled(&progress_state, &session_id);
         return;
     }
@@ -83,17 +76,13 @@ pub async fn process_upload_queue(
     for (i, file_path) in file_paths.iter().enumerate() {
         // Check cancellation every few files during validation
         if i % 5 == 0 && is_session_cancelled(&progress_state, &session_id) {
-            log::info!(
-                "Session {} cancelled during file validation at file {}",
-                session_id,
-                i
-            );
+            log::info!("Session {session_id} cancelled during file validation at file {i}");
             mark_session_cancelled(&progress_state, &session_id);
             return;
         }
 
         if let Err(e) = security::InputValidator::validate_image_file(file_path) {
-            log::error!("File validation failed for {}: {}", file_path, e);
+            log::error!("File validation failed for {file_path}: {e}");
             update_progress_failure(
                 &progress_state,
                 &session_id,
@@ -107,7 +96,7 @@ pub async fn process_upload_queue(
     }
 
     if valid_files.is_empty() {
-        log::warn!("No valid files to upload for session {}", session_id);
+        log::warn!("No valid files to upload for session {session_id}");
         mark_session_completed(&progress_state, &session_id);
         emit_session_progress(&app_handle, &progress_state, &session_id);
         return;
@@ -115,7 +104,7 @@ pub async fn process_upload_queue(
 
     // Check cancellation before grouping
     if is_session_cancelled(&progress_state, &session_id) {
-        log::info!("Session {} cancelled before grouping images", session_id);
+        log::info!("Session {session_id} cancelled before grouping images");
         mark_session_cancelled(&progress_state, &session_id);
         return;
     }
@@ -134,7 +123,7 @@ pub async fn process_upload_queue(
 
     // Emit loading metadata event for all files
     app_handle
-        .emit_all(
+        .emit(
             "upload-item-progress",
             serde_json::json!({
                 "session_id": session_id,
@@ -161,7 +150,7 @@ pub async fn process_upload_queue(
 
     // Emit grouping complete event
     app_handle
-        .emit_all(
+        .emit(
             "upload-item-progress",
             serde_json::json!({
                 "session_id": session_id,
@@ -175,11 +164,7 @@ pub async fn process_upload_queue(
     let mut total_processed = 0;
     let total_groups = groups.len();
 
-    log::info!(
-        "Processing {} groups for session {}",
-        total_groups,
-        session_id
-    );
+    log::info!("Processing {total_groups} groups for session {session_id}");
 
     // Load overrides
     let overrides = database::get_user_webhook_overrides()
@@ -224,7 +209,7 @@ pub async fn process_upload_queue(
 
         // Emit per-group progress
         app_handle
-            .emit_all(
+            .emit(
                 "upload-item-progress",
                 serde_json::json!({
                     "session_id": session_id,
@@ -286,7 +271,7 @@ pub async fn process_upload_queue(
         // Update merged thread ID if we are in single thread mode and got a new ID
         if single_thread_mode && merged_thread_id.is_none() {
             if let Some(tid) = new_thread_id {
-                log::info!("🧵 Single Thread Mode: Captured thread ID {}", tid);
+                log::info!("🧵 Single Thread Mode: Captured thread ID {tid}");
                 merged_thread_id = Some(tid);
             }
         }
@@ -327,7 +312,7 @@ pub async fn process_upload_queue(
     }
 
     if is_session_cancelled(&progress_state, &session_id) {
-        log::info!("Session {} was cancelled before completion", session_id);
+        log::info!("Session {session_id} was cancelled before completion");
         mark_session_cancelled(&progress_state, &session_id);
         return;
     }
@@ -472,8 +457,7 @@ async fn process_image_group_with_failure_handling(
                         chrono::Local::now().format("%Y-%m-%d")
                     );
                     log::warn!(
-                        "Missing metadata for forum thread, using fallback name: '{}'",
-                        fallback
+                        "Missing metadata for forum thread, using fallback name: '{fallback}'"
                     );
                     Some(fallback)
                 });
@@ -482,13 +466,13 @@ async fn process_image_group_with_failure_handling(
                 // Send as text with thread_name to create the thread
                 // With retry logic for message too long errors
                 update_progress_current_with_phase(
-                    &progress_state,
-                    &session_id,
+                    progress_state,
+                    session_id,
                     chunk.first().cloned().unwrap_or_default(),
                     "Creating Thread",
                     0.0,
                 );
-                safe_emit_event(&app_handle, "upload-progress", &session_id);
+                safe_emit_event(app_handle, "upload-progress", session_id);
 
                 let forum_result = client
                     .send_forum_text_message(&webhook.url, &main_content, thread_name.as_deref())
@@ -500,8 +484,7 @@ async fn process_image_group_with_failure_handling(
                         if let Some(extracted_thread_id) = extract_thread_id(&response_data) {
                             thread_id = Some(extracted_thread_id.clone());
                             log::info!(
-                                "✅ Forum thread created with thread_id: {}",
-                                extracted_thread_id
+                                "✅ Forum thread created with thread_id: {extracted_thread_id}"
                             );
 
                             // Send overflow messages to the thread
@@ -519,8 +502,7 @@ async fn process_image_group_with_failure_handling(
                             }
                         } else {
                             log::error!(
-                                "🔴 Failed to extract thread_id from forum response! Raw body: {}",
-                                response_data
+                                "🔴 Failed to extract thread_id from forum response! Raw body: {response_data}"
                             );
                         }
                     }
@@ -553,8 +535,7 @@ async fn process_image_group_with_failure_handling(
                                     {
                                         thread_id = Some(extracted_thread_id.clone());
                                         log::info!(
-                                            "✅ Forum thread created with worlds-only message, thread_id: {}",
-                                            extracted_thread_id
+                                            "✅ Forum thread created with worlds-only message, thread_id: {extracted_thread_id}"
                                         );
 
                                         // Send player messages to the thread
@@ -618,8 +599,7 @@ async fn process_image_group_with_failure_handling(
                                                 {
                                                     thread_id = Some(extracted_thread_id.clone());
                                                     log::info!(
-                                                        "✅ Forum thread created with world summary, thread_id: {}",
-                                                        extracted_thread_id
+                                                        "✅ Forum thread created with world summary, thread_id: {extracted_thread_id}"
                                                     );
 
                                                     // Send link messages
@@ -665,15 +645,14 @@ async fn process_image_group_with_failure_handling(
                                                 }
                                             }
                                             Err(e3) => {
-                                                log::error!("Failed to create forum thread with world summary: {}", e3);
+                                                log::error!("Failed to create forum thread with world summary: {e3}");
                                                 for file_path in chunk.iter() {
                                                     update_progress_group_failure(
                                                         progress_state,
                                                         session_id,
                                                         file_path.clone(),
                                                         format!(
-                                                            "Failed to create forum thread: {}",
-                                                            e3
+                                                            "Failed to create forum thread: {e3}"
                                                         ),
                                                         true,
                                                         group.group_id.clone(),
@@ -684,15 +663,14 @@ async fn process_image_group_with_failure_handling(
                                         }
                                     } else {
                                         log::error!(
-                                            "Failed to send forum worlds-only message: {}",
-                                            e2
+                                            "Failed to send forum worlds-only message: {e2}"
                                         );
                                         for file_path in chunk.iter() {
                                             update_progress_group_failure(
                                                 progress_state,
                                                 session_id,
                                                 file_path.clone(),
-                                                format!("Failed to create forum thread: {}", e2),
+                                                format!("Failed to create forum thread: {e2}"),
                                                 true,
                                                 group.group_id.clone(),
                                             );
@@ -702,14 +680,14 @@ async fn process_image_group_with_failure_handling(
                                 }
                             }
                         } else {
-                            log::error!("Failed to send forum text message: {}", e);
+                            log::error!("Failed to send forum text message: {e}");
                             // Mark files as failed and return
                             for file_path in chunk.iter() {
                                 update_progress_group_failure(
                                     progress_state,
                                     session_id,
                                     file_path.clone(),
-                                    format!("Failed to create forum thread: {}", e),
+                                    format!("Failed to create forum thread: {e}"),
                                     true,
                                     group.group_id.clone(),
                                 );
@@ -817,8 +795,7 @@ async fn process_image_group_with_failure_handling(
                                             .await
                                         {
                                             log::warn!(
-                                                "Failed to send world summary message: {}",
-                                                e3
+                                                "Failed to send world summary message: {e3}"
                                             );
                                         }
 
@@ -871,12 +848,12 @@ async fn process_image_group_with_failure_handling(
                                             link_messages.len()
                                         );
                                     } else {
-                                        log::warn!("Failed to send worlds-only message: {}", e2);
+                                        log::warn!("Failed to send worlds-only message: {e2}");
                                     }
                                 }
                             }
                         } else {
-                            log::warn!("Failed to send initial text message: {}", e);
+                            log::warn!("Failed to send initial text message: {e}");
                         }
                     }
                 }
@@ -912,10 +889,7 @@ async fn process_image_group_with_failure_handling(
         // Update progress to show current files being uploaded/compressed
         for (file_index, file_path) in chunk.iter().enumerate() {
             if is_session_cancelled(progress_state, session_id) {
-                log::info!(
-                    "❌ Session {} cancelled while updating progress",
-                    session_id
-                );
+                log::info!("❌ Session {session_id} cancelled while updating progress");
                 return (false, None);
             }
 
@@ -931,7 +905,7 @@ async fn process_image_group_with_failure_handling(
 
             // Emit per-file progress event
             app_handle
-                .emit_all(
+                .emit(
                     "upload-item-progress",
                     serde_json::json!({
                         "session_id": session_id,
@@ -967,10 +941,7 @@ async fn process_image_group_with_failure_handling(
         {
             Ok(response_data) => {
                 if is_session_cancelled(progress_state, session_id) {
-                    log::info!(
-                        "❌ Session {} cancelled after successful chunk upload",
-                        session_id
-                    );
+                    log::info!("❌ Session {session_id} cancelled after successful chunk upload");
                     return (false, None);
                 }
 
@@ -983,8 +954,7 @@ async fn process_image_group_with_failure_handling(
                     if let Some(extracted_thread_id) = extract_thread_id(&response_data) {
                         thread_id = Some(extracted_thread_id.clone());
                         log::info!(
-                            "✅ SUCCESS: Forum post created with thread_id: {}",
-                            extracted_thread_id
+                            "✅ SUCCESS: Forum post created with thread_id: {extracted_thread_id}"
                         );
                     } else {
                         log::error!(
@@ -1051,7 +1021,7 @@ async fn process_image_group_with_failure_handling(
 
                     // Emit per-file success event
                     app_handle
-                        .emit_all(
+                        .emit(
                             "upload-item-progress",
                             serde_json::json!({
                                 "session_id": session_id,
@@ -1077,8 +1047,8 @@ async fn process_image_group_with_failure_handling(
                 // Enhanced error logging for forum channels
                 if is_forum_channel && e.to_string().contains("thread_name or thread_id") {
                     log::error!("🔴 FORUM CHANNEL ERROR 220001: Missing thread_name or thread_id");
-                    log::error!("   Chunk index: {}", chunk_index);
-                    log::error!("   Is first message: {}", first_message);
+                    log::error!("   Chunk index: {chunk_index}");
+                    log::error!("   Is first message: {first_message}");
                     log::error!("   Thread ID available: {}", thread_id.is_some());
 
                     if chunk_index == 0 {
@@ -1110,7 +1080,7 @@ async fn process_image_group_with_failure_handling(
                     // Record failed upload in database (non-blocking)
                     let file_path_clone = file_path.clone();
                     let file_name_clone = file_name.clone();
-                    let error_message = format!("Group failure: {}", e);
+                    let error_message = format!("Group failure: {e}");
                     let webhook_id = webhook.id;
                     tokio::spawn(async move {
                         let _ = database::record_upload(
@@ -1130,7 +1100,7 @@ async fn process_image_group_with_failure_handling(
                         progress_state,
                         session_id,
                         file_path.clone(),
-                        format!("Forum channel group upload failed: {}", e),
+                        format!("Forum channel group upload failed: {e}"),
                         true,
                         group.group_id.clone(),
                     );
@@ -1211,7 +1181,7 @@ pub async fn upload_image_chunk_with_thread_id(
 
         // Emit streaming event for upload start
         app_handle
-            .emit_all(
+            .emit(
                 "upload-item-progress",
                 serde_json::json!({
                     "session_id": session_id,
@@ -1238,10 +1208,7 @@ pub async fn upload_image_chunk_with_thread_id(
 
     match result {
         Ok(response) => {
-            log::info!(
-                "Upload successful without compression for session {}",
-                session_id
-            );
+            log::info!("Upload successful without compression for session {session_id}");
             Ok(response)
         }
         Err(e) => {
@@ -1327,7 +1294,7 @@ async fn try_upload_chunk_with_thread_id(
             ));
         }
 
-        payload.add_file(file_path, format!("files[{}]", i)).await?;
+        payload.add_file(file_path, format!("files[{i}]")).await?;
     }
 
     // Final cancellation check before HTTP request
@@ -1374,10 +1341,7 @@ async fn upload_compressed_chunk_with_thread_id(
         let mut cleanup_paths = Vec::new();
 
         log::info!(
-            "Attempting upload (Tier {}): Format={}, Quality={}",
-            tier,
-            current_format,
-            current_quality
+            "Attempting upload (Tier {tier}): Format={current_format}, Quality={current_quality}"
         );
 
         for (i, file_path) in file_paths.iter().enumerate() {
@@ -1412,7 +1376,7 @@ async fn upload_compressed_chunk_with_thread_id(
                     cleanup_paths.push(p);
                 }
                 Err(e) => {
-                    log::warn!("Compression failed for {}: {}", file_path, e);
+                    log::warn!("Compression failed for {file_path}: {e}");
                     // For Tier 0, fallback to original file if compression fails?
                     // No, if compression fails, we probably shouldn't upload original if we were trying to safeguard size.
                     // But typically we treat failure as "use original".
@@ -1465,7 +1429,7 @@ async fn upload_compressed_chunk_with_thread_id(
                     || err_str.contains("413")
                     || err_str.contains("too large")
                 {
-                    log::warn!("Upload failed due to size limit (Tier {}).", tier);
+                    log::warn!("Upload failed due to size limit (Tier {tier}).");
 
                     // Move to next tier
                     tier += 1;
@@ -1536,7 +1500,7 @@ async fn upload_chunk_files(
         payload.add_text_field(k.clone(), v.clone());
     }
     for (i, file_path) in file_paths.iter().enumerate() {
-        payload.add_file(file_path, format!("files[{}]", i)).await?;
+        payload.add_file(file_path, format!("files[{i}]")).await?;
     }
     client
         .send_webhook_with_thread_id(&webhook.url, &payload, thread_id)

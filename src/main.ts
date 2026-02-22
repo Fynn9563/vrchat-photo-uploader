@@ -1,10 +1,11 @@
 import './styles.css';
-import { invoke, convertFileSrc } from '@tauri-apps/api/tauri';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/api/dialog';
-import { readBinaryFile } from '@tauri-apps/api/fs';
+import { open } from '@tauri-apps/plugin-dialog';
+
 import { getVersion } from '@tauri-apps/api/app';
-import { appWindow } from '@tauri-apps/api/window';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+const appWindow = getCurrentWebviewWindow()
 
 console.log('VRChat Photo Uploader starting...');
 
@@ -1871,8 +1872,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Setup modal events
   ModalManager.setupModalEvents();
 
-  listen('tauri://file-drop', async (event) => {
-    const filePaths = event.payload as string[];
+  listen('tauri://drag-drop', async (event) => {
+    const { paths: filePaths } = event.payload as { paths: string[]; position: { x: number; y: number } };
     console.log('Native drag & drop - files:', filePaths);
 
     // Filter for image files only
