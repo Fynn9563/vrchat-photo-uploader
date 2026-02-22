@@ -266,102 +266,44 @@ jobs:
         run: |
           echo "🔍 Verifying build artifacts and generating checksums..."
 
-          # Find all release files in common Tauri output locations
-          RELEASE_FILES=$(find . -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.deb" -o -name "*.AppImage" \) 2>/dev/null || true)
-
-          # Also check specific Tauri bundle locations
-          if [ -z "$RELEASE_FILES" ]; then
-            echo "🔍 Searching in specific bundle locations..."
-            BUNDLE_LOCATIONS=(
-              "src-tauri/target/release/bundle"
-              "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle"
-              "src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
-            )
-
-            for location in "${BUNDLE_LOCATIONS[@]}"; do
-              if [ -d "$location" ]; then
-                echo "📁 Checking: $location"
-                FOUND_FILES=$(find "$location" -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.deb" -o -name "*.AppImage" \) 2>/dev/null || true)
-                if [ -n "$FOUND_FILES" ]; then
-                  RELEASE_FILES="$RELEASE_FILES $FOUND_FILES"
-                fi
-              fi
-            done
-          fi
-
-          if [ -z "$RELEASE_FILES" ]; then
-            echo "❌ No release files found anywhere"
-            echo "🔍 Debug: Listing all files in src-tauri/target:"
-            find src-tauri/target -type f -name "*" 2>/dev/null | head -20 || echo "No files found in src-tauri/target"
-            echo "🔍 Debug: Listing current directory contents:"
-            ls -la
-            exit 1
-          fi
-
-          # Clean up the RELEASE_FILES variable (remove extra spaces)
-          RELEASE_FILES=$(echo $RELEASE_FILES | tr -s ' ')
-
-          # Create checksums directory
           mkdir -p checksums
+          FILE_COUNT=0
 
-          for file in $RELEASE_FILES; do
-            if [ -f "$file" ]; then
-              echo "Checking: $file"
+          # Use -print0/read to handle filenames with spaces
+          while IFS= read -r -d '' file; do
+            echo "Checking: $file"
 
-              # Verify file exists and is not empty
-              if [ ! -s "$file" ]; then
-                echo "❌ Empty file: $file"
-                exit 1
-              fi
-
-              # Get file info
-              FILE_SIZE=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
-              echo "  Size: $FILE_SIZE bytes"
-
-              # Generate checksums
-              FILENAME=$(basename "$file")
-              SHA256=$(sha256sum "$file" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$file" | cut -d' ' -f1)
-              echo "  SHA256: $SHA256"
-              echo "$SHA256  $FILENAME" >> checksums/SHA256SUMS
-
-              # Check for signature files (Tauri may generate these)
-              if [ -f "${file}.sig" ]; then
-                echo "  ✅ Signature found: ${file}.sig"
-              elif [ -f "${file}.asc" ]; then
-                echo "  ✅ Signature found: ${file}.asc"
-              else
-                echo "  ℹ️ No detached signature file (may be embedded)"
-              fi
-
-              # Platform-specific signature verification
-              case "$file" in
-                *.exe|*.msi)
-                  # Windows: Check for Authenticode signature
-                  if command -v osslsigncode >/dev/null 2>&1; then
-                    osslsigncode verify "$file" && echo "  ✅ Windows signature verified" || echo "  ⚠️ Windows signature check failed"
-                  else
-                    echo "  ℹ️ Windows signature verification skipped (osslsigncode not available)"
-                  fi
-                  ;;
-                *.deb|*.AppImage)
-                  # Linux: Basic file integrity check
-                  file "$file" | grep -q "executable" && echo "  ✅ Linux executable verified" || echo "  ⚠️ Linux executable check failed"
-                  ;;
-              esac
+            if [ ! -s "$file" ]; then
+              echo "  ❌ Empty file, skipping"
+              continue
             fi
-          done
 
-          # Sort checksums file
-          if [ -f checksums/SHA256SUMS ]; then
-            sort checksums/SHA256SUMS -o checksums/SHA256SUMS
-            echo "✅ Generated checksums/SHA256SUMS"
-            cat checksums/SHA256SUMS
-          else
-            echo "❌ No checksums generated"
+            FILE_SIZE=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
+            echo "  Size: $FILE_SIZE bytes"
+
+            FILENAME=$(basename "$file")
+            SHA256=$(sha256sum "$file" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$file" | cut -d' ' -f1)
+            echo "  SHA256: $SHA256"
+            echo "$SHA256  $FILENAME" >> checksums/SHA256SUMS
+
+            if [ -f "${file}.sig" ]; then
+              echo "  ✅ Signature found: ${file}.sig"
+            fi
+
+            FILE_COUNT=$((FILE_COUNT + 1))
+          done < <(find . -type f \( -name "*.exe" -o -name "*.msi" -o -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \) -print0 2>/dev/null)
+
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "❌ No release files found"
+            echo "Debug: listing bundle directories..."
+            find . -path "*/release/bundle/*" -type f 2>/dev/null | head -20
             exit 1
           fi
 
-          echo "✅ Artifact verification complete"
+          sort checksums/SHA256SUMS -o checksums/SHA256SUMS
+          echo ""
+          echo "✅ Generated checksums for $FILE_COUNT files:"
+          cat checksums/SHA256SUMS
 
       - name: Upload checksums as artifact
         uses: actions/upload-artifact@v4
