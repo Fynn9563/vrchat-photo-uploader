@@ -73,7 +73,7 @@ pub async fn group_images_by_metadata(
             // Emit progress
             let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
             // Emit batch updates to avoid flooding event loop for 5000 items
-            if done % 5 == 0 || done == total_files {
+            if done.is_multiple_of(5) || done == total_files {
                 app_handle.emit("upload-progress", serde_json::json!({
                     "session_id": session_id,
                     "total_images": total_files,
@@ -117,9 +117,9 @@ pub async fn group_images_by_metadata(
                 last_valid_group_key = Some(key.clone());
             }
             key
-        } else if merge_no_metadata && last_valid_group_key.is_some() {
+        } else if let Some(prev_key) = last_valid_group_key.as_ref().filter(|_| merge_no_metadata) {
             // If merging is enabled and we have a previous group, use it!
-            let key = last_valid_group_key.as_ref().unwrap().clone();
+            let key = prev_key.clone();
             log::info!("Merging no-metadata file {file_path} into previous group: {key}");
             key
         } else if no_time_limit {
@@ -273,6 +273,23 @@ fn create_metadata_key(
     }
 }
 
+/// Format a player for Discord: returns `<@discord_id>` if mapped, else `**PlayerName**`
+fn format_player_for_discord(
+    player: &PlayerInfo,
+    discord_mappings: &HashMap<String, String>,
+) -> String {
+    // Check by VRChat user ID first (more reliable), then by display name
+    // Keys in the map are lowercased for case-insensitive matching
+    if let Some(discord_id) = discord_mappings
+        .get(&player.id.to_lowercase())
+        .or_else(|| discord_mappings.get(&player.display_name.to_lowercase()))
+    {
+        format!("<@{discord_id}>")
+    } else {
+        format!("**{}**", player.display_name)
+    }
+}
+
 /// Creates Discord payload. Returns (main_payload, overflow_messages)
 #[allow(clippy::too_many_arguments)]
 pub fn create_discord_payload(
@@ -285,6 +302,7 @@ pub fn create_discord_payload(
     _thread_id: Option<&str>,
     include_player_names: bool,
     image_count: usize,
+    discord_mappings: &HashMap<String, String>,
 ) -> (HashMap<String, String>, Vec<String>) {
     let mut payload = HashMap::new();
     let mut overflow_messages = Vec::new();
@@ -297,6 +315,7 @@ pub fn create_discord_payload(
             timestamp,
             include_player_names,
             image_count,
+            discord_mappings,
         );
         payload.insert("content".to_string(), content);
 
@@ -307,8 +326,11 @@ pub fn create_discord_payload(
 
         // Create overflow messages for remaining players
         if !remaining_players.is_empty() {
-            overflow_messages =
-                create_overflow_player_messages(&remaining_players, had_players_in_main);
+            overflow_messages = create_overflow_player_messages(
+                &remaining_players,
+                had_players_in_main,
+                discord_mappings,
+            );
         }
     } else if chunk_index > 0 {
         // No text for continuation chunks - just upload the images silently
@@ -324,6 +346,7 @@ fn create_message_content_with_players(
     timestamp: Option<i64>,
     include_player_names: bool,
     image_count: usize,
+    discord_mappings: &HashMap<String, String>,
 ) -> (String, Vec<PlayerInfo>, bool) {
     const MAX_LENGTH: usize = 1900;
     let mut content = String::new();
@@ -357,7 +380,7 @@ fn create_message_content_with_players(
         // Add players if requested
         if include_player_names && !all_players.is_empty() {
             // Check if we can fit at least "with " + one player name
-            let first_player = format!("**{}**", all_players[0].display_name);
+            let first_player = format_player_for_discord(&all_players[0], discord_mappings);
             let with_prefix = " with ";
 
             if content.len() + with_prefix.len() + first_player.len() <= MAX_LENGTH {
@@ -367,7 +390,7 @@ fn create_message_content_with_players(
 
                 let mut players_added = 1;
                 for player in all_players.iter().skip(1) {
-                    let player_str = format!("**{}**", player.display_name);
+                    let player_str = format_player_for_discord(player, discord_mappings);
                     let addition = format!(", {player_str}");
 
                     if content.len() + addition.len() > MAX_LENGTH {
@@ -410,6 +433,7 @@ fn create_message_content_with_players(
 fn create_overflow_player_messages(
     remaining_players: &[PlayerInfo],
     had_players_in_main: bool,
+    discord_mappings: &HashMap<String, String>,
 ) -> Vec<String> {
     const MAX_LENGTH: usize = 1900; // Leave buffer for Discord's 2000 char limit
     let mut messages = Vec::new();
@@ -423,7 +447,7 @@ fn create_overflow_player_messages(
     let prefix_len = current.len();
 
     for player in remaining_players.iter() {
-        let player_str = format!("**{}**", player.display_name);
+        let player_str = format_player_for_discord(player, discord_mappings);
         let separator = if current.len() > prefix_len { ", " } else { "" };
         let addition = format!("{separator}{player_str}");
 
@@ -556,7 +580,10 @@ pub fn create_compact_world_messages(
 }
 
 /// Creates player messages that fit within Discord's limit (used when combined message is too long)
-pub fn create_split_player_messages(all_players: &[PlayerInfo]) -> Vec<String> {
+pub fn create_split_player_messages(
+    all_players: &[PlayerInfo],
+    discord_mappings: &HashMap<String, String>,
+) -> Vec<String> {
     const MAX_LENGTH: usize = 1900;
     let mut messages = Vec::new();
 
@@ -568,7 +595,7 @@ pub fn create_split_player_messages(all_players: &[PlayerInfo]) -> Vec<String> {
     let prefix_len = current.len();
 
     for player in all_players.iter() {
-        let player_str = format!("**{}**", player.display_name);
+        let player_str = format_player_for_discord(player, discord_mappings);
         let separator = if current.len() > prefix_len { ", " } else { "" };
         let addition = format!("{separator}{player_str}");
 
@@ -576,7 +603,7 @@ pub fn create_split_player_messages(all_players: &[PlayerInfo]) -> Vec<String> {
             // Current message is full, end with comma and start new one
             current.push(',');
             messages.push(current);
-            current = format!("**{}**", player.display_name);
+            current = format_player_for_discord(player, discord_mappings);
         } else {
             current.push_str(&addition);
         }
@@ -587,7 +614,10 @@ pub fn create_split_player_messages(all_players: &[PlayerInfo]) -> Vec<String> {
         messages.push(current);
     } else if current == "with " && !all_players.is_empty() {
         // Edge case: first player name alone
-        messages.push(format!("with **{}**", all_players[0].display_name));
+        messages.push(format!(
+            "with {}",
+            format_player_for_discord(&all_players[0], discord_mappings)
+        ));
     }
 
     log::info!(
@@ -632,6 +662,7 @@ mod tests {
     fn test_payload_first_message_with_world() {
         let worlds = vec![make_world("Test World", "wrld_123")];
         let players = vec![];
+        let no_mappings = HashMap::new();
         let (payload, overflow) = create_discord_payload(
             &worlds,
             &players,
@@ -642,6 +673,7 @@ mod tests {
             None,
             false,
             3,
+            &no_mappings,
         );
         let content = payload.get("content").unwrap();
         assert!(content.contains("Photos taken at"));
@@ -652,8 +684,19 @@ mod tests {
 
     #[test]
     fn test_payload_first_message_no_world() {
-        let (payload, _) =
-            create_discord_payload(&[], &[], Some(1705312200), true, 0, false, None, false, 5);
+        let no_mappings = HashMap::new();
+        let (payload, _) = create_discord_payload(
+            &[],
+            &[],
+            Some(1705312200),
+            true,
+            0,
+            false,
+            None,
+            false,
+            5,
+            &no_mappings,
+        );
         let content = payload.get("content").unwrap();
         assert!(content.contains("Photos"));
         assert!(content.contains("<t:1705312200:f>"));
@@ -662,8 +705,19 @@ mod tests {
     #[test]
     fn test_payload_continuation_chunk_empty() {
         let worlds = vec![make_world("W", "wrld_1")];
-        let (payload, _) =
-            create_discord_payload(&worlds, &[], None, false, 1, false, None, false, 2);
+        let no_mappings = HashMap::new();
+        let (payload, _) = create_discord_payload(
+            &worlds,
+            &[],
+            None,
+            false,
+            1,
+            false,
+            None,
+            false,
+            2,
+            &no_mappings,
+        );
         // Continuation chunks should have no content
         assert!(!payload.contains_key("content"));
     }
@@ -671,8 +725,19 @@ mod tests {
     #[test]
     fn test_payload_forum_adds_thread_name() {
         let worlds = vec![make_world("My World", "wrld_456")];
-        let (payload, _) =
-            create_discord_payload(&worlds, &[], None, true, 0, true, None, false, 2);
+        let no_mappings = HashMap::new();
+        let (payload, _) = create_discord_payload(
+            &worlds,
+            &[],
+            None,
+            true,
+            0,
+            true,
+            None,
+            false,
+            2,
+            &no_mappings,
+        );
         assert!(payload.contains_key("thread_name"));
         let thread_name = payload.get("thread_name").unwrap();
         assert!(thread_name.contains("My World"));
@@ -680,7 +745,9 @@ mod tests {
 
     #[test]
     fn test_payload_singular_photo() {
-        let (payload, _) = create_discord_payload(&[], &[], None, true, 0, false, None, false, 1);
+        let no_mappings = HashMap::new();
+        let (payload, _) =
+            create_discord_payload(&[], &[], None, true, 0, false, None, false, 1, &no_mappings);
         let content = payload.get("content").unwrap();
         assert!(content.contains("Photo"));
         assert!(!content.contains("Photos"));
@@ -688,7 +755,9 @@ mod tests {
 
     #[test]
     fn test_payload_plural_photos() {
-        let (payload, _) = create_discord_payload(&[], &[], None, true, 0, false, None, false, 2);
+        let no_mappings = HashMap::new();
+        let (payload, _) =
+            create_discord_payload(&[], &[], None, true, 0, false, None, false, 2, &no_mappings);
         let content = payload.get("content").unwrap();
         assert!(content.contains("Photos"));
     }
@@ -697,8 +766,19 @@ mod tests {
     fn test_payload_with_players() {
         let worlds = vec![make_world("W", "wrld_1")];
         let players = vec![make_player("Alice"), make_player("Bob")];
-        let (payload, overflow) =
-            create_discord_payload(&worlds, &players, None, true, 0, false, None, true, 2);
+        let no_mappings = HashMap::new();
+        let (payload, overflow) = create_discord_payload(
+            &worlds,
+            &players,
+            None,
+            true,
+            0,
+            false,
+            None,
+            true,
+            2,
+            &no_mappings,
+        );
         let content = payload.get("content").unwrap();
         assert!(content.contains("Alice"));
         assert!(content.contains("Bob"));
@@ -709,8 +789,19 @@ mod tests {
     fn test_payload_without_player_names_flag() {
         let worlds = vec![make_world("W", "wrld_1")];
         let players = vec![make_player("Alice")];
-        let (payload, _) =
-            create_discord_payload(&worlds, &players, None, true, 0, false, None, false, 2);
+        let no_mappings = HashMap::new();
+        let (payload, _) = create_discord_payload(
+            &worlds,
+            &players,
+            None,
+            true,
+            0,
+            false,
+            None,
+            false,
+            2,
+            &no_mappings,
+        );
         let content = payload.get("content").unwrap();
         assert!(!content.contains("Alice"));
     }
@@ -807,8 +898,9 @@ mod tests {
     fn test_content_with_players_fits() {
         let worlds = vec![make_world("W", "wrld_1")];
         let players = vec![make_player("Alice"), make_player("Bob")];
+        let no_mappings = HashMap::new();
         let (content, remaining, had_players) =
-            create_message_content_with_players(&worlds, &players, None, true, 2);
+            create_message_content_with_players(&worlds, &players, None, true, 2, &no_mappings);
         assert!(content.contains("Alice"));
         assert!(content.contains("Bob"));
         assert!(remaining.is_empty());
@@ -819,8 +911,9 @@ mod tests {
     fn test_content_no_players_when_disabled() {
         let worlds = vec![make_world("W", "wrld_1")];
         let players = vec![make_player("Alice")];
+        let no_mappings = HashMap::new();
         let (content, remaining, had_players) =
-            create_message_content_with_players(&worlds, &players, None, false, 2);
+            create_message_content_with_players(&worlds, &players, None, false, 2, &no_mappings);
         assert!(!content.contains("Alice"));
         assert!(remaining.is_empty());
         assert!(!had_players);
@@ -833,8 +926,9 @@ mod tests {
         let players: Vec<PlayerInfo> = (0..200)
             .map(|i| make_player(&format!("Player_{i:04}")))
             .collect();
+        let no_mappings = HashMap::new();
         let (content, remaining, had_players) =
-            create_message_content_with_players(&worlds, &players, None, true, 5);
+            create_message_content_with_players(&worlds, &players, None, true, 5, &no_mappings);
         assert!(content.len() <= 1901, "Content too long: {}", content.len());
         assert!(!remaining.is_empty(), "Should have overflow players");
         assert!(had_players);
@@ -845,7 +939,8 @@ mod tests {
     #[test]
     fn test_overflow_single_message() {
         let players = vec![make_player("Alice"), make_player("Bob")];
-        let msgs = create_overflow_player_messages(&players, true);
+        let no_mappings = HashMap::new();
+        let msgs = create_overflow_player_messages(&players, true, &no_mappings);
         assert_eq!(msgs.len(), 1);
         assert!(msgs[0].contains("Alice"));
         assert!(msgs[0].contains("Bob"));
@@ -854,7 +949,8 @@ mod tests {
     #[test]
     fn test_overflow_with_prefix_when_no_main_players() {
         let players = vec![make_player("Alice")];
-        let msgs = create_overflow_player_messages(&players, false);
+        let no_mappings = HashMap::new();
+        let msgs = create_overflow_player_messages(&players, false, &no_mappings);
         assert_eq!(msgs.len(), 1);
         assert!(msgs[0].starts_with("with "));
     }
@@ -865,7 +961,8 @@ mod tests {
         let players: Vec<PlayerInfo> = (0..300)
             .map(|i| make_player(&format!("LongPlayerName_{i:04}")))
             .collect();
-        let msgs = create_overflow_player_messages(&players, true);
+        let no_mappings = HashMap::new();
+        let msgs = create_overflow_player_messages(&players, true, &no_mappings);
         assert!(
             msgs.len() > 1,
             "Should need multiple messages for {} players",
@@ -926,14 +1023,16 @@ mod tests {
 
     #[test]
     fn test_split_players_empty() {
-        let msgs = create_split_player_messages(&[]);
+        let no_mappings = HashMap::new();
+        let msgs = create_split_player_messages(&[], &no_mappings);
         assert!(msgs.is_empty());
     }
 
     #[test]
     fn test_split_players_single() {
         let players = vec![make_player("Alice")];
-        let msgs = create_split_player_messages(&players);
+        let no_mappings = HashMap::new();
+        let msgs = create_split_player_messages(&players, &no_mappings);
         assert_eq!(msgs.len(), 1);
         assert!(msgs[0].contains("with "));
         assert!(msgs[0].contains("Alice"));
@@ -946,7 +1045,8 @@ mod tests {
             make_player("Bob"),
             make_player("Charlie"),
         ];
-        let msgs = create_split_player_messages(&players);
+        let no_mappings = HashMap::new();
+        let msgs = create_split_player_messages(&players, &no_mappings);
         assert_eq!(msgs.len(), 1);
         assert!(msgs[0].contains("Alice"));
         assert!(msgs[0].contains("Bob"));
@@ -958,10 +1058,78 @@ mod tests {
         let players: Vec<PlayerInfo> = (0..300)
             .map(|i| make_player(&format!("LongName_{i:04}")))
             .collect();
-        let msgs = create_split_player_messages(&players);
+        let no_mappings = HashMap::new();
+        let msgs = create_split_player_messages(&players, &no_mappings);
         assert!(msgs.len() > 1);
         for msg in &msgs {
             assert!(msg.len() <= 1901, "Message too long: {}", msg.len());
         }
+    }
+
+    // --- format_player_for_discord tests ---
+
+    #[test]
+    fn test_format_player_unmapped() {
+        let player = make_player("Alice");
+        let no_mappings = HashMap::new();
+        let result = format_player_for_discord(&player, &no_mappings);
+        assert_eq!(result, "**Alice**");
+    }
+
+    #[test]
+    fn test_format_player_mapped_by_id() {
+        let player = make_player("Alice");
+        let mut mappings = HashMap::new();
+        mappings.insert(player.id.clone(), "123456789".to_string());
+        let result = format_player_for_discord(&player, &mappings);
+        assert_eq!(result, "<@123456789>");
+    }
+
+    #[test]
+    fn test_format_player_mapped_by_display_name() {
+        let player = make_player("Alice");
+        let mut mappings = HashMap::new();
+        // Keys are lowercased (matching how the upload pipeline builds the map)
+        mappings.insert("alice".to_string(), "987654321".to_string());
+        let result = format_player_for_discord(&player, &mappings);
+        assert_eq!(result, "<@987654321>");
+    }
+
+    #[test]
+    fn test_format_player_id_takes_priority_over_name() {
+        let player = make_player("Alice");
+        let mut mappings = HashMap::new();
+        mappings.insert(player.id.clone(), "111111111".to_string());
+        mappings.insert("alice".to_string(), "222222222".to_string());
+        let result = format_player_for_discord(&player, &mappings);
+        // ID mapping should take priority
+        assert_eq!(result, "<@111111111>");
+    }
+
+    #[test]
+    fn test_format_player_case_insensitive() {
+        let player = make_player("Alice"); // display_name = "Alice"
+        let mut mappings = HashMap::new();
+        // Lowercase key matches uppercase display name
+        mappings.insert("alice".to_string(), "555555555".to_string());
+        let result = format_player_for_discord(&player, &mappings);
+        assert_eq!(result, "<@555555555>");
+    }
+
+    #[test]
+    fn test_payload_with_discord_mappings() {
+        let worlds = vec![make_world("W", "wrld_1")];
+        let players = vec![make_player("Alice"), make_player("Bob")];
+        let mut mappings = HashMap::new();
+        mappings.insert("usr_alice".to_string(), "123456789".to_string());
+        let (payload, _) = create_discord_payload(
+            &worlds, &players, None, true, 0, false, None, true, 2, &mappings,
+        );
+        let content = payload.get("content").unwrap();
+        assert!(
+            content.contains("<@123456789>"),
+            "Alice should be tagged: {content}"
+        );
+        assert!(content.contains("**Bob**"), "Bob should be bold: {content}");
     }
 }

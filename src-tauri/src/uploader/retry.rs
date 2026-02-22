@@ -71,6 +71,24 @@ pub async fn retry_single_upload(
         .map(|w| vec![w])
         .unwrap_or_default();
 
+    // Load Discord user mappings for player tagging
+    let discord_mappings_list = database::get_discord_user_mappings()
+        .await
+        .unwrap_or_default();
+    let discord_user_map: HashMap<String, String> = discord_mappings_list
+        .into_iter()
+        .flat_map(|m| {
+            let mut items = Vec::new();
+            if let Some(uid) = m.vrchat_user_id {
+                items.push((uid.to_lowercase(), m.discord_user_id.clone()));
+            }
+            if let Some(name) = m.vrchat_display_name {
+                items.push((name.to_lowercase(), m.discord_user_id));
+            }
+            items
+        })
+        .collect();
+
     let (text_fields, player_messages) = create_discord_payload(
         &all_worlds,
         &all_players,
@@ -81,6 +99,7 @@ pub async fn retry_single_upload(
         None,
         true,
         1, // Single image retry
+        &discord_user_map,
     );
 
     let dummy_progress_state = Arc::new(Mutex::new(HashMap::new()));

@@ -172,6 +172,23 @@ pub async fn init_database() -> AppResult<()> {
     .execute(&pool)
     .await?;
 
+    // Create table for Discord user mappings (VRChat player → Discord @mention)
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS discord_user_mappings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vrchat_display_name TEXT,
+            vrchat_user_id TEXT,
+            discord_user_id TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(vrchat_display_name),
+            UNIQUE(vrchat_user_id)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
     // Add indexes for better query performance
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_upload_history_hash ON upload_history(file_hash)")
         .execute(&pool)
@@ -286,6 +303,20 @@ pub async fn migrate_database() -> AppResult<()> {
             .await?;
     }
 
+    // Check if pinned column exists on webhooks table
+    let pinned_column_check =
+        sqlx::query("SELECT name FROM pragma_table_info('webhooks') WHERE name = 'pinned'")
+            .fetch_optional(pool)
+            .await?;
+
+    if pinned_column_check.is_none() {
+        log::info!("Adding pinned column to webhooks table");
+
+        sqlx::query("ALTER TABLE webhooks ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT FALSE")
+            .execute(pool)
+            .await?;
+    }
+
     log::info!("Database migration completed successfully");
     Ok(())
 }
@@ -300,7 +331,7 @@ pub async fn get_all_webhooks() -> AppResult<Vec<Webhook>> {
     let pool = get_pool()?;
 
     let rows = sqlx::query(
-        "SELECT id, name, url, is_forum FROM webhooks ORDER BY last_used_at DESC, name ASC",
+        "SELECT id, name, url, is_forum, pinned FROM webhooks ORDER BY pinned DESC, last_used_at DESC, name ASC",
     )
     .fetch_all(pool)
     .await?;
@@ -312,6 +343,7 @@ pub async fn get_all_webhooks() -> AppResult<Vec<Webhook>> {
             name: row.get("name"),
             url: row.get("url"),
             is_forum: row.get("is_forum"),
+            pinned: row.get("pinned"),
         });
     }
 
@@ -321,7 +353,7 @@ pub async fn get_all_webhooks() -> AppResult<Vec<Webhook>> {
 pub async fn get_webhook_by_id(id: i64) -> AppResult<Webhook> {
     let pool = get_pool()?;
 
-    let row = sqlx::query("SELECT id, name, url, is_forum FROM webhooks WHERE id = ?")
+    let row = sqlx::query("SELECT id, name, url, is_forum, pinned FROM webhooks WHERE id = ?")
         .bind(id)
         .fetch_one(pool)
         .await?;
@@ -331,6 +363,7 @@ pub async fn get_webhook_by_id(id: i64) -> AppResult<Webhook> {
         name: row.get("name"),
         url: row.get("url"),
         is_forum: row.get("is_forum"),
+        pinned: row.get("pinned"),
     })
 }
 
@@ -390,6 +423,27 @@ pub async fn delete_webhook(id: i64) -> AppResult<()> {
 
     log::info!("Deleted webhook with id: {id}");
     Ok(())
+}
+
+pub async fn toggle_webhook_pin(id: i64) -> AppResult<bool> {
+    let pool = get_pool()?;
+
+    let row = sqlx::query("SELECT pinned FROM webhooks WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await?;
+
+    let current: bool = row.get("pinned");
+    let new_pinned = !current;
+
+    sqlx::query("UPDATE webhooks SET pinned = ? WHERE id = ?")
+        .bind(new_pinned)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+    log::info!("Toggled webhook {id} pinned: {current} -> {new_pinned}");
+    Ok(new_pinned)
 }
 
 pub async fn update_webhook_usage(webhook_id: i64) -> AppResult<()> {
@@ -595,6 +649,127 @@ pub async fn delete_user_webhook_override(id: i64) -> AppResult<()> {
     let pool = get_pool()?;
 
     let result = sqlx::query("DELETE FROM user_webhook_overrides WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::Database(sqlx::Error::RowNotFound));
+    }
+
+    Ok(())
+}
+
+// Discord User Mappings (VRChat player → Discord @mention)
+#[derive(Debug, serde::Serialize)]
+pub struct DiscordUserMapping {
+    pub id: i64,
+    pub vrchat_display_name: Option<String>,
+    pub vrchat_user_id: Option<String>,
+    pub discord_user_id: String,
+}
+
+pub async fn get_discord_user_mappings() -> AppResult<Vec<DiscordUserMapping>> {
+    let pool = get_pool()?;
+
+    let rows = sqlx::query(
+        "SELECT id, vrchat_display_name, vrchat_user_id, discord_user_id FROM discord_user_mappings ORDER BY id DESC",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut mappings = Vec::new();
+    for row in rows {
+        mappings.push(DiscordUserMapping {
+            id: row.get("id"),
+            vrchat_display_name: row.get("vrchat_display_name"),
+            vrchat_user_id: row.get("vrchat_user_id"),
+            discord_user_id: row.get("discord_user_id"),
+        });
+    }
+
+    Ok(mappings)
+}
+
+pub async fn add_discord_user_mapping(
+    vrchat_display_name: Option<String>,
+    vrchat_user_id: Option<String>,
+    discord_user_id: String,
+) -> AppResult<i64> {
+    let pool = get_pool()?;
+
+    if vrchat_display_name.is_none() && vrchat_user_id.is_none() {
+        return Err(AppError::validation(
+            "user",
+            "Must provide either VRChat Display Name or VRChat User ID",
+        ));
+    }
+
+    if discord_user_id.is_empty() || !discord_user_id.chars().all(|c| c.is_ascii_digit()) {
+        return Err(AppError::validation(
+            "discord_user_id",
+            "Discord User ID must be a numeric ID",
+        ));
+    }
+
+    let result = sqlx::query(
+        "INSERT INTO discord_user_mappings (vrchat_display_name, vrchat_user_id, discord_user_id) VALUES (?, ?, ?)",
+    )
+    .bind(&vrchat_display_name)
+    .bind(&vrchat_user_id)
+    .bind(&discord_user_id)
+    .execute(pool)
+    .await;
+
+    match result {
+        Ok(result) => Ok(result.last_insert_rowid()),
+        Err(e) => Err(AppError::Database(e)),
+    }
+}
+
+pub async fn update_discord_user_mapping(
+    id: i64,
+    vrchat_display_name: Option<String>,
+    vrchat_user_id: Option<String>,
+    discord_user_id: String,
+) -> AppResult<()> {
+    let pool = get_pool()?;
+
+    if vrchat_display_name.is_none() && vrchat_user_id.is_none() {
+        return Err(AppError::validation(
+            "user",
+            "Must provide either VRChat Display Name or VRChat User ID",
+        ));
+    }
+
+    if discord_user_id.is_empty() || !discord_user_id.chars().all(|c| c.is_ascii_digit()) {
+        return Err(AppError::validation(
+            "discord_user_id",
+            "Discord User ID must be a numeric ID",
+        ));
+    }
+
+    let result = sqlx::query(
+        "UPDATE discord_user_mappings SET vrchat_display_name = ?, vrchat_user_id = ?, discord_user_id = ? WHERE id = ?",
+    )
+    .bind(&vrchat_display_name)
+    .bind(&vrchat_user_id)
+    .bind(&discord_user_id)
+    .bind(id)
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::Database(sqlx::Error::RowNotFound));
+    }
+
+    Ok(())
+}
+
+pub async fn delete_discord_user_mapping(id: i64) -> AppResult<()> {
+    let pool = get_pool()?;
+
+    let result = sqlx::query("DELETE FROM discord_user_mappings WHERE id = ?")
         .bind(id)
         .execute(pool)
         .await?;

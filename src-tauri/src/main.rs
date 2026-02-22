@@ -64,6 +64,7 @@ fn main() {
             add_webhook,
             update_webhook,
             delete_webhook,
+            toggle_webhook_pin,
             upload_images,
             get_upload_progress,
             retry_failed_upload,
@@ -88,7 +89,11 @@ fn main() {
             check_for_updates,
             get_user_webhook_overrides,
             add_user_webhook_override,
-            delete_user_webhook_override
+            delete_user_webhook_override,
+            get_discord_user_mappings,
+            add_discord_user_mapping,
+            update_discord_user_mapping,
+            delete_discord_user_mapping
         ])
         .setup(|app| {
             log::info!("Setting up application...");

@@ -9,11 +9,19 @@ const appWindow = getCurrentWebviewWindow()
 
 console.log('VRChat Photo Uploader starting...');
 
+/** Escape user-controlled strings before inserting into innerHTML templates. */
+function escapeHtml(str: string): string {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 interface Webhook {
   id: number;
   name: string;
   url: string;
   is_forum: boolean;
+  pinned: boolean;
 }
 
 interface QueueItem {
@@ -41,6 +49,9 @@ interface UploadProgress {
   successful_uploads: string[];
   session_status: string;
   estimated_time_remaining?: number;
+  current_webhook_index: number;
+  total_webhooks: number;
+  current_webhook_name: string;
 }
 
 interface FailedUpload {
@@ -51,6 +62,7 @@ interface FailedUpload {
 
 interface AppConfig {
   last_webhook_id?: number;
+  last_webhook_ids?: number[];
   group_by_metadata: boolean;
   max_images_per_message: number;
   enable_global_shortcuts: boolean;
@@ -59,10 +71,12 @@ interface AppConfig {
   compression_format: string; // "webp" or "jpg"
   enable_auto_upload?: boolean;
   auto_upload_webhook_id?: number;
+  auto_upload_webhook_ids?: number[];
   vrchat_path?: string;
   single_thread_mode: boolean;
   merge_no_metadata: boolean;
   default_forum_mode: boolean;
+  enable_multi_webhook: boolean;
   auto_upload_delay_seconds: number;
   auto_upload_batch_size: number;
   auto_upload_forum_channel: boolean;
@@ -81,6 +95,13 @@ interface UserWebhookOverride {
   user_id?: string;
   user_display_name?: string;
   webhook_id: number;
+}
+
+interface DiscordUserMapping {
+  id: number;
+  vrchat_display_name?: string;
+  vrchat_user_id?: string;
+  discord_user_id: string;
 }
 
 // App state management
@@ -103,6 +124,9 @@ class AppState {
   private lastManualSessionId: string | null = null; // Tracks last manual session even after completion
   private backgroundSessionId: string | null = null;
   public selectedWebhookId: number | null = null;
+  public selectedWebhookIds: number[] = [];
+  public multiWebhookEnabled: boolean = false;
+  private lastSeenWebhookIndex: number = 0;
   private progressPollingInterval: number | null = null;
   private isUploading: boolean = false;
   private notificationsEnabled: boolean = true;
@@ -287,14 +311,15 @@ class AppState {
       count.textContent = `${progress.completed} / ${progress.total_images}`;
     }
 
+    const bgIsLastWebhook = progress.current_webhook_index >= progress.total_webhooks - 1;
+
     if (fill && progress.total_images > 0) {
       const percentage = (progress.completed / progress.total_images) * 100;
       fill.style.width = `${percentage}%`;
 
       // Reset classes
       fill.classList.remove('error', 'warning');
-
-      if (progress.session_status === 'completed') {
+      if (progress.session_status === 'completed' && bgIsLastWebhook) {
         if (text) text.textContent = 'Upload complete!';
         if (fill) fill.style.width = '100%';
 
@@ -317,7 +342,7 @@ class AppState {
       return; // Keep visible if failed
     }
 
-    if (progress.session_status === 'completed' || progress.completed >= progress.total_images) {
+    if ((progress.session_status === 'completed' && bgIsLastWebhook) || progress.completed >= progress.total_images) {
       if (text) text.textContent = 'Upload complete!';
       setTimeout(() => {
         // Only hide if it's still showing "completed" behavior
@@ -378,7 +403,7 @@ class AppState {
 
       if (!img) {
         // Clear placeholder text and inject img
-        element.innerHTML = `<img src="${convertFileSrc(item.thumbnailPath)}" alt="${item.filename}" class="queue-thumbnail-img" loading="lazy" />`;
+        element.innerHTML = `<img src="${convertFileSrc(item.thumbnailPath)}" alt="${escapeHtml(item.filename)}" class="queue-thumbnail-img" loading="lazy" />`;
         item.thumbnailLoaded = true;
       } else {
         img.src = convertFileSrc(item.thumbnailPath);
@@ -420,14 +445,11 @@ class AppState {
     try {
       this.webhooks = await invoke('get_webhooks');
 
-      // Check if currently selected webhook still exists
-      if (this.selectedWebhookId) {
-        const webhookExists = this.webhooks.some(w => w.id === this.selectedWebhookId);
-        if (!webhookExists) {
-          // Reset selection if webhook was deleted
-          this.selectedWebhookId = null;
-        }
-      }
+      // Filter out selected webhooks that no longer exist
+      this.selectedWebhookIds = this.selectedWebhookIds.filter(id =>
+        this.webhooks.some(w => w.id === id)
+      );
+      this.selectedWebhookId = this.selectedWebhookIds[0] ?? null;
 
       this.updateWebhookSelector();
     } catch (error) {
@@ -436,32 +458,124 @@ class AppState {
   }
 
   updateWebhookSelector() {
-    const select = document.getElementById('webhookSelect') as HTMLSelectElement;
-    if (!select) return;
+    const panel = document.getElementById('webhookDropdownPanel');
+    if (!panel) return;
 
-    select.innerHTML = '<option value="">Select a webhook...</option>';
+    panel.innerHTML = '';
 
     this.webhooks.forEach(webhook => {
-      const option = document.createElement('option');
-      option.value = webhook.id.toString();
-      option.textContent = webhook.name;
-      select.appendChild(option);
+      const label = document.createElement('label');
+      label.className = 'webhook-option';
+      label.dataset['webhookId'] = webhook.id.toString();
+      if (this.selectedWebhookIds.includes(webhook.id)) {
+        label.classList.add('selected');
+      }
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'webhook-checkbox';
+      cb.value = webhook.id.toString();
+      cb.checked = this.selectedWebhookIds.includes(webhook.id);
+
+      cb.addEventListener('change', () => {
+        if (this.multiWebhookEnabled) {
+          // Multi-select mode: toggle individual webhooks
+          if (cb.checked) {
+            if (!this.selectedWebhookIds.includes(webhook.id)) {
+              this.selectedWebhookIds.push(webhook.id);
+            }
+          } else {
+            this.selectedWebhookIds = this.selectedWebhookIds.filter(id => id !== webhook.id);
+          }
+          label.classList.toggle('selected', cb.checked);
+        } else {
+          // Single-select mode: select only this webhook
+          this.selectedWebhookIds = cb.checked ? [webhook.id] : [];
+          // Uncheck all other checkboxes and remove selected class
+          panel!.querySelectorAll('.webhook-option').forEach(opt => {
+            const optCb = opt.querySelector('.webhook-checkbox') as HTMLInputElement;
+            if (optCb && optCb !== cb) {
+              optCb.checked = false;
+              opt.classList.remove('selected');
+            }
+          });
+          label.classList.toggle('selected', cb.checked);
+          // Auto-close dropdown in single-select mode
+          if (cb.checked) {
+            panel!.classList.add('hidden');
+            document.getElementById('multiWebhookDropdown')?.classList.remove('open');
+          }
+        }
+        this.selectedWebhookId = this.selectedWebhookIds[0] ?? null;
+        this.updateDropdownSummary();
+        this.updateSingleThreadVisibility();
+        this.updateControlButtons();
+        this.resetUploadStatuses();
+      });
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'webhook-option-name';
+      nameSpan.textContent = webhook.is_forum ? `${webhook.name} (Forum)` : webhook.name;
+
+      const pinBtn = document.createElement('button');
+      pinBtn.className = `webhook-pin-btn${webhook.pinned ? ' pinned' : ''}`;
+      pinBtn.title = webhook.pinned ? 'Unpin webhook' : 'Pin to top';
+      pinBtn.innerHTML = webhook.pinned ? '📌' : '📌';
+      pinBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          const newPinned: boolean = await invoke('toggle_webhook_pin', { id: webhook.id });
+          webhook.pinned = newPinned;
+          await this.loadWebhooks();
+          this.updateWebhookSelector();
+        } catch (err) {
+          this.showError(`Failed to pin webhook: ${err}`);
+        }
+      });
+
+      label.appendChild(cb);
+      label.appendChild(nameSpan);
+      label.appendChild(pinBtn);
+      panel.appendChild(label);
     });
 
-    // Restore selection if webhook still exists
-    if (this.selectedWebhookId) {
-      const webhookExists = this.webhooks.some(w => w.id === this.selectedWebhookId);
-      if (webhookExists) {
-        select.value = this.selectedWebhookId.toString();
-      } else {
-        // Webhook was deleted, clear selection
-        this.selectedWebhookId = null;
-        select.value = '';
-      }
-    }
+    // Toggle single/multi mode class on dropdown container
+    const dropdown = document.getElementById('multiWebhookDropdown');
+    dropdown?.classList.toggle('single-mode', !this.multiWebhookEnabled);
 
+    this.updateDropdownSummary();
+    this.updateSingleThreadVisibility();
     this.updateExistingWebhooksDropdown();
-    this.updateControlButtons(); // Update upload button state
+    this.updateControlButtons();
+  }
+
+  updateDropdownSummary() {
+    const summary = document.getElementById('webhookSelectionSummary');
+    if (!summary) return;
+    const count = this.selectedWebhookIds.length;
+    if (count === 0) {
+      summary.textContent = this.multiWebhookEnabled ? 'Select webhooks...' : 'Select a webhook...';
+    } else if (count === 1) {
+      const w = this.webhooks.find(wh => wh.id === this.selectedWebhookIds[0]);
+      summary.textContent = w ? (w.is_forum ? `${w.name} (Forum)` : w.name) : '1 webhook selected';
+    } else {
+      summary.textContent = `${count} webhooks selected`;
+    }
+  }
+
+  updateSingleThreadVisibility() {
+    const container = document.getElementById('singleThreadModeContainer');
+    if (!container) return;
+    const selected = this.webhooks.filter(w => this.selectedWebhookIds.includes(w.id));
+    const anyForum = selected.some(w => w.is_forum);
+    if (anyForum) {
+      container.classList.remove('hidden');
+    } else {
+      container.classList.add('hidden');
+      const cb = document.getElementById('singleThreadMode') as HTMLInputElement;
+      if (cb) cb.checked = false;
+    }
   }
 
   updateExistingWebhooksDropdown() {
@@ -483,9 +597,9 @@ class AppState {
     if (editBtn) editBtn.disabled = true;
   }
 
-  async addWebhook(name: string, url: string) {
+  async addWebhook(name: string, url: string, isForum: boolean) {
     try {
-      await invoke('add_webhook', { name, url, isForum: false });
+      await invoke('add_webhook', { name, url, isForum });
       await this.loadWebhooks();
 
       this.updateWebhookSelector(); // This will now show the new webhook as selected
@@ -496,9 +610,9 @@ class AppState {
     }
   }
 
-  async updateWebhook(id: number, name: string, url: string) {
+  async updateWebhook(id: number, name: string, url: string, isForum: boolean) {
     try {
-      await invoke('update_webhook', { id, name, url, isForum: false });
+      await invoke('update_webhook', { id, name, url, isForum });
       await this.loadWebhooks();
       this.showSuccess('Webhook updated successfully!');
     } catch (error) {
@@ -688,7 +802,7 @@ class AppState {
       } else {
         statusIcon = '<span class="status-icon">📄</span>';
       }
-      statusEl.innerHTML = `${item.statusText || item.status} ${statusIcon}`;
+      statusEl.innerHTML = `${escapeHtml(item.statusText || item.status)} ${statusIcon}`;
     }
 
     // Update progress bar
@@ -737,20 +851,20 @@ class AppState {
       <input type="checkbox" class="queue-checkbox" ${item.selected ? 'checked' : ''}>
       <div class="queue-thumbnail" data-item-id="${item.id}">
         ${item.thumbnailPath ?
-        `<img src="${thumbSrc}" alt="${item.filename}" class="queue-thumbnail-img" loading="lazy" />` :
-        item.filename.substring(0, 3).toUpperCase()
+        `<img src="${thumbSrc}" alt="${escapeHtml(item.filename)}" class="queue-thumbnail-img" loading="lazy" />` :
+        escapeHtml(item.filename.substring(0, 3).toUpperCase())
       }
       </div>
       <div class="queue-info">
-        <div class="queue-filename">${item.filename}</div>
-        <div class="queue-status">${item.statusText || item.status} ${statusIcon}</div>
+        <div class="queue-filename">${escapeHtml(item.filename)}</div>
+        <div class="queue-status">${escapeHtml(item.statusText || item.status)} ${statusIcon}</div>
         <div class="queue-size">${sizeText} ${dimensionsText}</div>
         ${item.status === 'uploading' ? `
           <div class="queue-progress">
             <div class="queue-progress-bar" style="width: ${item.progress}%"></div>
           </div>
         ` : ''}
-        ${item.error ? `<div class="error-message">${item.error}</div>` : ''}
+        ${item.error ? `<div class="error-message">${escapeHtml(item.error)}</div>` : ''}
       </div>
       <div class="queue-actions">
         ${item.status === 'error' && item.retryCount < 3 ? `
@@ -911,7 +1025,7 @@ class AppState {
     const viewMetadataBtn = document.getElementById('viewMetadataBtn') as HTMLButtonElement;
 
     if (startBtn) {
-      startBtn.disabled = selectedCount === 0 || !this.selectedWebhookId || this.isUploading;
+      startBtn.disabled = selectedCount === 0 || this.selectedWebhookIds.length === 0 || this.isUploading;
     }
     if (viewMetadataBtn) viewMetadataBtn.disabled = selectedCount === 0;
   }
@@ -922,8 +1036,8 @@ class AppState {
       return;
     }
 
-    if (!this.selectedWebhookId) {
-      this.showError('Please select a webhook first');
+    if (this.selectedWebhookIds.length === 0) {
+      this.showError('Please select at least one webhook first');
       return;
     }
 
@@ -951,10 +1065,10 @@ class AppState {
 
     try {
       this.isUploading = true;
+      this.lastSeenWebhookIndex = 0;
       console.log('Starting upload - setting isUploading = true');
 
       const groupByMetadata = (document.getElementById('groupByMetadata') as HTMLInputElement).checked;
-      const isForumChannel = (document.getElementById('isForumChannel') as HTMLInputElement).checked;
       const maxImages = parseInt((document.getElementById('maxImages') as HTMLSelectElement).value);
       const includePlayerNames = (document.getElementById('includePlayerNames') as HTMLInputElement).checked;
 
@@ -978,11 +1092,10 @@ class AppState {
 
       const sessionId = await invoke('upload_images', {
         request: {
-          webhook_id: this.selectedWebhookId,
+          webhook_ids: this.selectedWebhookIds,
           file_paths: filePaths,
           group_by_metadata: groupByMetadata,
           max_images_per_message: maxImages,
-          is_forum_channel: isForumChannel,
           include_player_names: includePlayerNames,
           grouping_time_window: groupingTimeWindow,
           group_by_world: groupByWorld,
@@ -1051,7 +1164,8 @@ class AppState {
           this.updateProgressFromSession(progress);
 
           const allFilesProcessed = progress.completed >= progress.total_images;
-          const sessionCompleted = progress.session_status === 'completed' ||
+          const isLastWebhook = progress.current_webhook_index >= progress.total_webhooks - 1;
+          const sessionCompleted = (progress.session_status === 'completed' && isLastWebhook) ||
             progress.session_status === 'failed' ||
             progress.session_status === 'cancelled' ||
             allFilesProcessed;
@@ -1082,6 +1196,19 @@ class AppState {
   }
 
   updateProgressFromSession(progress: UploadProgress) {
+    // Detect webhook transition: reset all selected items back to queued
+    if (progress.total_webhooks > 1 && progress.current_webhook_index !== this.lastSeenWebhookIndex) {
+      this.lastSeenWebhookIndex = progress.current_webhook_index;
+      this.uploadQueue.forEach(item => {
+        if (item.selected) {
+          item.status = 'queued';
+          item.progress = 0;
+          item.error = null;
+          item.statusText = undefined;
+        }
+      });
+    }
+
     this.uploadQueue.forEach(item => {
       if (item.selected && item.filePath) {
         const isSuccessful = progress.successful_uploads.some(path =>
@@ -1176,7 +1303,14 @@ class AppState {
       }
 
       if (progressCount) {
-        progressCount.textContent = `${progress.completed} / ${progress.total_images}`;
+        if (progress.total_webhooks > 1) {
+          const webhookLabel = progress.current_webhook_name
+            ? `${progress.current_webhook_name} (${progress.current_webhook_index + 1}/${progress.total_webhooks})`
+            : `Webhook ${progress.current_webhook_index + 1}/${progress.total_webhooks}`;
+          progressCount.textContent = `${webhookLabel} — ${progress.completed} / ${progress.total_images}`;
+        } else {
+          progressCount.textContent = `${progress.completed} / ${progress.total_images}`;
+        }
       }
 
       if (progressFill) {
@@ -1856,12 +1990,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load config and apply default settings
   try {
     const config = await invoke<AppConfig>('get_app_config');
-    const isForumChannelCheckbox = document.getElementById('isForumChannel') as HTMLInputElement;
-    if (isForumChannelCheckbox && config.default_forum_mode) {
-      isForumChannelCheckbox.checked = true;
-    }
     // Show/hide background queue button based on auto-upload setting
     updateBackgroundQueueButtonVisibility(config.enable_auto_upload || false);
+
+    // Restore saved webhook selection
+    const savedIds = config.last_webhook_ids && config.last_webhook_ids.length > 0
+      ? config.last_webhook_ids
+      : config.last_webhook_id ? [config.last_webhook_id] : [];
+    state.multiWebhookEnabled = config.enable_multi_webhook || false;
+    state.selectedWebhookIds = savedIds.filter(id => state.webhooks.some(w => w.id === id));
+    // If multi-webhook is disabled, keep only the first selection
+    if (!state.multiWebhookEnabled && state.selectedWebhookIds.length > 1) {
+      state.selectedWebhookIds = [state.selectedWebhookIds[0]];
+    }
+    state.selectedWebhookId = state.selectedWebhookIds[0] ?? null;
+    state.updateWebhookSelector();
   } catch (error) {
     console.error('Failed to load config:', error);
   }
@@ -2166,7 +2309,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const updateStatus = document.getElementById('updateStatus');
     if (updateStatus) {
       updateStatus.style.display = 'block';
-      updateStatus.innerHTML = `✅ Update available: v${event.payload.version}<br><small>The update will be installed automatically.</small>`;
+      updateStatus.innerHTML = `✅ Update available: v${escapeHtml(String(event.payload.version))}<br><small>The update will be installed automatically.</small>`;
       updateStatus.className = 'update-status success';
     }
 
@@ -2223,19 +2366,29 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   loadImagePreviewSetting();
 
-  // Webhook selector
-  const webhookSelect = document.getElementById('webhookSelect') as HTMLSelectElement;
-  webhookSelect.addEventListener('change', (e) => {
-    const target = e.target as HTMLSelectElement;
-    const newWebhookId = target.value ? parseInt(target.value) : null;
+  // Webhook multi-select dropdown
+  const webhookTrigger = document.getElementById('webhookDropdownTrigger');
+  const webhookPanel = document.getElementById('webhookDropdownPanel');
+  const webhookWrapper = document.getElementById('multiWebhookDropdown');
 
-    // Reset upload statuses
-    if (newWebhookId !== state.selectedWebhookId && state.getAllQueueItems().length > 0) {
-      state.resetUploadStatuses();
+  webhookTrigger?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = !webhookPanel?.classList.contains('hidden');
+    if (isOpen) {
+      webhookPanel?.classList.add('hidden');
+      webhookWrapper?.classList.remove('open');
+    } else {
+      webhookPanel?.classList.remove('hidden');
+      webhookWrapper?.classList.add('open');
     }
+  });
 
-    state.selectedWebhookId = newWebhookId;
-    state.updateControlButtons();
+  // Close dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!webhookWrapper?.contains(e.target as Node)) {
+      webhookPanel?.classList.add('hidden');
+      webhookWrapper?.classList.remove('open');
+    }
   });
 
   state.updateExistingWebhooksDropdown();
@@ -2305,7 +2458,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   addWebhookBtn?.addEventListener('click', async () => {
     const nameInput = document.getElementById('webhookName') as HTMLInputElement;
     const urlInput = document.getElementById('webhookUrl') as HTMLInputElement;
-    const isForumCheckbox = document.getElementById('isForum') as HTMLInputElement;
+    const isForumCheckbox = document.getElementById('webhookIsForum') as HTMLInputElement;
     const addBtn = addWebhookBtn;
 
     if (!nameInput.value.trim() || !urlInput.value.trim()) {
@@ -2313,18 +2466,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
+    const isForum = isForumCheckbox?.checked || false;
     const editingId = addBtn.dataset.editingId;
 
     if (editingId) {
       await state.updateWebhook(
         parseInt(editingId),
         nameInput.value.trim(),
-        urlInput.value.trim()
+        urlInput.value.trim(),
+        isForum
       );
     } else {
       await state.addWebhook(
         nameInput.value.trim(),
-        urlInput.value.trim()
+        urlInput.value.trim(),
+        isForum
       );
 
       // Reset selection after adding new webhook
@@ -2334,6 +2490,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Clear form
     nameInput.value = '';
     urlInput.value = '';
+    if (isForumCheckbox) isForumCheckbox.checked = false;
     addBtn.textContent = '➕ Add Webhook';
     delete addBtn.dataset.editingId;
 
@@ -2396,7 +2553,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const nameInput = document.getElementById('webhookName') as HTMLInputElement;
     const urlInput = document.getElementById('webhookUrl') as HTMLInputElement;
-    const isForumCheckbox = document.getElementById('isForum') as HTMLInputElement;
+    const isForumCheckbox = document.getElementById('webhookIsForum') as HTMLInputElement;
 
     if (nameInput) nameInput.value = selectedWebhook.name;
     if (urlInput) urlInput.value = selectedWebhook.url;
@@ -2549,8 +2706,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Forum channel warning
-  const isForumChannelCheckbox = document.getElementById('isForumChannel') as HTMLInputElement;
   const maxImagesSelect = document.getElementById('maxImages') as HTMLSelectElement;
 
   // Quick actions
@@ -2569,7 +2724,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     listContainer.innerHTML = ignoredFolders.map((folder, index) => `
       <div class="ignored-folder-item" style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: var(--bg-secondary); border-radius: 4px; margin-bottom: 4px;">
-        <span style="font-size: 0.875rem;">📁 ${folder}</span>
+        <span style="font-size: 0.875rem;">📁 ${escapeHtml(folder)}</span>
         <button type="button" class="remove-ignored-folder-btn" data-index="${index}" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 6px; font-size: 0.875rem;">✕</button>
       </div>
     `).join('');
@@ -2632,29 +2787,173 @@ document.addEventListener('DOMContentLoaded', async () => {
       const autoUploadCheck = document.getElementById('enableAutoUpload') as HTMLInputElement;
       if (autoUploadCheck) autoUploadCheck.checked = config.enable_auto_upload || false;
 
+      const enableMultiWebhook = document.getElementById('enableMultiWebhook') as HTMLInputElement;
+      if (enableMultiWebhook) enableMultiWebhook.checked = config.enable_multi_webhook || false;
+
       // Update background queue button visibility based on auto-upload setting
       updateBackgroundQueueButtonVisibility(config.enable_auto_upload || false);
 
       // Update auto-upload settings visibility
       updateAutoUploadSettingsVisibility(config.enable_auto_upload || false);
 
-      const autoUploadSelect = document.getElementById('autoUploadWebhook') as HTMLSelectElement;
-      if (autoUploadSelect) {
-        autoUploadSelect.innerHTML = '<option value="">Select Webhook...</option>';
-        // Assuming state is accessible here via closure or global. state is available in this scope.
-        // Wait, 'state' variable is defined where? 'const state = new AppState();' usually. 
-        // In the snippet, it's inside 'document.addEventListener("DOMContentLoaded", ...)'
-        // 'state' is defined at top of that block. Yes.
-        state.webhooks.forEach(w => {
-          const opt = document.createElement('option');
-          opt.value = w.id.toString();
-          opt.textContent = w.name;
-          autoUploadSelect.appendChild(opt);
-        });
-        if (config.auto_upload_webhook_id) {
-          autoUploadSelect.value = config.auto_upload_webhook_id.toString();
+      // Auto-upload webhook multi-select
+      const autoUploadPanel = document.getElementById('autoUploadWebhookPanel');
+      const autoUploadSummary = document.getElementById('autoUploadWebhookSummary');
+      const autoUploadTrigger = document.getElementById('autoUploadWebhookTrigger');
+      const autoUploadWrapper = document.getElementById('autoUploadWebhookDropdown');
+
+      // Resolve saved auto-upload webhook IDs (with backward compat)
+      const savedAutoUploadIds = config.auto_upload_webhook_ids && config.auto_upload_webhook_ids.length > 0
+        ? config.auto_upload_webhook_ids
+        : config.auto_upload_webhook_id ? [config.auto_upload_webhook_id] : [];
+      let autoUploadSelectedIds: number[] = savedAutoUploadIds.filter(id =>
+        state.webhooks.some(w => w.id === id)
+      );
+
+      const updateAutoUploadSummary = () => {
+        if (!autoUploadSummary) return;
+        const multiEnabled = (document.getElementById('enableMultiWebhook') as HTMLInputElement)?.checked ?? false;
+        const count = autoUploadSelectedIds.length;
+        if (count === 0) {
+          autoUploadSummary.textContent = multiEnabled ? 'Select webhooks...' : 'Select a webhook...';
+        } else if (count === 1) {
+          const w = state.webhooks.find(wh => wh.id === autoUploadSelectedIds[0]);
+          autoUploadSummary.textContent = w ? (w.is_forum ? `${w.name} (Forum)` : w.name) : '1 webhook selected';
+        } else {
+          autoUploadSummary.textContent = `${count} webhooks selected`;
         }
+      };
+
+      const updateAutoUploadSingleThreadVisibility = () => {
+        const container = document.getElementById('autoUploadSingleThreadContainer');
+        if (!container) return;
+        const selected = state.webhooks.filter(w => autoUploadSelectedIds.includes(w.id));
+        const anyForum = selected.some(w => w.is_forum);
+        if (anyForum) {
+          container.classList.remove('hidden');
+        } else {
+          container.classList.add('hidden');
+          const cb = document.getElementById('autoUploadSingleThread') as HTMLInputElement;
+          if (cb) cb.checked = false;
+        }
+      };
+
+      if (autoUploadPanel) {
+        autoUploadPanel.innerHTML = '';
+        state.webhooks.forEach(w => {
+          const label = document.createElement('label');
+          label.className = 'webhook-option';
+          if (autoUploadSelectedIds.includes(w.id)) label.classList.add('selected');
+
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.className = 'webhook-checkbox';
+          cb.value = w.id.toString();
+          cb.checked = autoUploadSelectedIds.includes(w.id);
+
+          cb.addEventListener('change', () => {
+            const multiEnabled = (document.getElementById('enableMultiWebhook') as HTMLInputElement)?.checked ?? false;
+            if (multiEnabled) {
+              // Multi-select mode: toggle individual webhooks
+              if (cb.checked) {
+                if (!autoUploadSelectedIds.includes(w.id)) autoUploadSelectedIds.push(w.id);
+              } else {
+                autoUploadSelectedIds = autoUploadSelectedIds.filter(id => id !== w.id);
+              }
+              label.classList.toggle('selected', cb.checked);
+            } else {
+              // Single-select mode: deselect others, select this one
+              autoUploadSelectedIds = cb.checked ? [w.id] : [];
+              autoUploadPanel!.querySelectorAll('.webhook-option').forEach(opt => {
+                const optCb = opt.querySelector('.webhook-checkbox') as HTMLInputElement;
+                const isThis = optCb.value === w.id.toString();
+                optCb.checked = isThis && cb.checked;
+                opt.classList.toggle('selected', isThis && cb.checked);
+              });
+              // Close dropdown in single-select mode
+              autoUploadWrapper?.classList.remove('open');
+              autoUploadPanel!.classList.add('hidden');
+            }
+            updateAutoUploadSummary();
+            updateAutoUploadSingleThreadVisibility();
+          });
+
+          const nameSpan = document.createElement('span');
+          nameSpan.className = 'webhook-option-name';
+          nameSpan.textContent = w.is_forum ? `${w.name} (Forum)` : w.name;
+
+          const pinBtn = document.createElement('button');
+          pinBtn.className = `webhook-pin-btn${w.pinned ? ' pinned' : ''}`;
+          pinBtn.title = w.pinned ? 'Unpin webhook' : 'Pin to top';
+          pinBtn.innerHTML = '📌';
+          pinBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+              const newPinned: boolean = await invoke('toggle_webhook_pin', { id: w.id });
+              w.pinned = newPinned;
+              pinBtn.classList.toggle('pinned', newPinned);
+              pinBtn.title = newPinned ? 'Unpin webhook' : 'Pin to top';
+              // Refresh main dropdown (re-sorted with pinned first)
+              await state.loadWebhooks();
+              state.updateWebhookSelector();
+            } catch (err) {
+              state.showError(`Failed to pin webhook: ${err}`);
+            }
+          });
+
+          label.appendChild(cb);
+          label.appendChild(nameSpan);
+          label.appendChild(pinBtn);
+          autoUploadPanel.appendChild(label);
+        });
+
+        // Toggle single/multi mode class
+        const multiEnabled = (document.getElementById('enableMultiWebhook') as HTMLInputElement)?.checked ?? false;
+        autoUploadWrapper?.classList.toggle('single-mode', !multiEnabled);
+
+        updateAutoUploadSummary();
+        updateAutoUploadSingleThreadVisibility();
       }
+
+      // Toggle dropdown open/close
+      autoUploadTrigger?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = !autoUploadPanel?.classList.contains('hidden');
+        if (isOpen) {
+          autoUploadPanel?.classList.add('hidden');
+          autoUploadWrapper?.classList.remove('open');
+        } else {
+          autoUploadPanel?.classList.remove('hidden');
+          autoUploadWrapper?.classList.add('open');
+        }
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!autoUploadWrapper?.contains(e.target as Node)) {
+          autoUploadPanel?.classList.add('hidden');
+          autoUploadWrapper?.classList.remove('open');
+        }
+      });
+
+      // Handle multi-webhook toggle: update dropdown mode and trim selections when disabled
+      const enableMultiWebhookCb = document.getElementById('enableMultiWebhook') as HTMLInputElement;
+      enableMultiWebhookCb?.addEventListener('change', () => {
+        const enabled = enableMultiWebhookCb.checked;
+        autoUploadWrapper?.classList.toggle('single-mode', !enabled);
+        if (!enabled && autoUploadSelectedIds.length > 1) {
+          // Trim to first selection only
+          const keepId = autoUploadSelectedIds[0];
+          autoUploadSelectedIds = [keepId];
+          autoUploadPanel?.querySelectorAll('.webhook-option').forEach(opt => {
+            const optCb = opt.querySelector('.webhook-checkbox') as HTMLInputElement;
+            const isKeep = parseInt(optCb.value) === keepId;
+            optCb.checked = isKeep;
+            opt.classList.toggle('selected', isKeep);
+          });
+        }
+        updateAutoUploadSummary();
+      });
 
       // Populate new settings
       const singleThreadMode = document.getElementById('singleThreadMode') as HTMLInputElement;
@@ -2663,17 +2962,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       const mergeNoMetadata = document.getElementById('mergeNoMetadata') as HTMLInputElement;
       if (mergeNoMetadata) mergeNoMetadata.checked = config.merge_no_metadata;
 
-      const defaultForumMode = document.getElementById('defaultForumMode') as HTMLInputElement;
-      if (defaultForumMode) defaultForumMode.checked = config.default_forum_mode ?? false;
-
       const autoUploadBatchSize = document.getElementById('autoUploadBatchSize') as HTMLInputElement;
       if (autoUploadBatchSize) autoUploadBatchSize.value = (config.auto_upload_batch_size || 10).toString();
 
       const autoUploadDelay = document.getElementById('autoUploadDelay') as HTMLInputElement;
       if (autoUploadDelay) autoUploadDelay.value = (config.auto_upload_delay_seconds || 5).toString();
-
-      const autoUploadForumChannel = document.getElementById('autoUploadForumChannel') as HTMLInputElement;
-      if (autoUploadForumChannel) autoUploadForumChannel.checked = config.auto_upload_forum_channel ?? false;
 
       const autoUploadSingleThread = document.getElementById('autoUploadSingleThread') as HTMLInputElement;
       if (autoUploadSingleThread) autoUploadSingleThread.checked = config.auto_upload_single_thread ?? false;
@@ -2767,7 +3060,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (error) {
       console.error('Failed to check for updates:', error);
       if (updateStatus) {
-        updateStatus.innerHTML = `❌ Failed to check for updates: ${error}`;
+        updateStatus.innerHTML = `❌ Failed to check for updates: ${escapeHtml(String(error))}`;
         updateStatus.className = 'update-status error';
       }
     }
@@ -3148,12 +3441,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // Validate background watcher settings
       const enableAutoUpload = (document.getElementById('enableAutoUpload') as HTMLInputElement)?.checked;
-      const autoUploadWebhook = document.getElementById('autoUploadWebhook') as HTMLSelectElement;
-      const autoUploadWebhookId = parseInt(autoUploadWebhook?.value || '0');
+      // Read auto-upload webhook IDs from the multi-select checkboxes
+      const autoUploadWebhookCheckboxes = document.querySelectorAll('#autoUploadWebhookPanel .webhook-checkbox:checked') as NodeListOf<HTMLInputElement>;
+      const autoUploadWebhookIds = Array.from(autoUploadWebhookCheckboxes).map(cb => parseInt(cb.value)).filter(id => !isNaN(id));
 
       if (enableAutoUpload) {
-        if (!autoUploadWebhookId) {
-          state.showError('Please select a webhook for background auto-upload');
+        if (autoUploadWebhookIds.length === 0) {
+          state.showError('Please select at least one webhook for background auto-upload');
           return;
         }
         if (!selectedVRChatFolder) {
@@ -3171,7 +3465,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const compressionFormat = document.getElementById('compressionFormat') as HTMLSelectElement;
 
       const config: AppConfig = {
-        last_webhook_id: state.selectedWebhookId ?? undefined,
+        last_webhook_id: state.selectedWebhookIds[0] ?? undefined,
+        last_webhook_ids: state.selectedWebhookIds,
         group_by_metadata: groupByMetadata?.checked || true,
         max_images_per_message: parseInt(maxImages?.value || '10'),
         enable_global_shortcuts: enableGlobalShortcuts?.checked || true,
@@ -3179,14 +3474,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         upload_quality: 85,
         compression_format: compressionFormat?.value || 'webp',
         enable_auto_upload: enableAutoUpload,
-        auto_upload_webhook_id: autoUploadWebhookId || undefined,
+        auto_upload_webhook_id: autoUploadWebhookIds[0] ?? undefined,
+        auto_upload_webhook_ids: autoUploadWebhookIds,
         vrchat_path: selectedVRChatFolder || undefined,
         single_thread_mode: (document.getElementById('singleThreadMode') as HTMLInputElement)?.checked || false,
         merge_no_metadata: (document.getElementById('mergeNoMetadata') as HTMLInputElement)?.checked || false,
-        default_forum_mode: (document.getElementById('defaultForumMode') as HTMLInputElement)?.checked || false,
+        default_forum_mode: false,
+        enable_multi_webhook: (document.getElementById('enableMultiWebhook') as HTMLInputElement)?.checked ?? false,
         auto_upload_delay_seconds: parseInt((document.getElementById('autoUploadDelay') as HTMLInputElement)?.value || '5'),
         auto_upload_batch_size: parseInt((document.getElementById('autoUploadBatchSize') as HTMLInputElement)?.value || '10'),
-        auto_upload_forum_channel: (document.getElementById('autoUploadForumChannel') as HTMLInputElement)?.checked ?? false,
+        auto_upload_forum_channel: false,
         auto_upload_single_thread: (document.getElementById('autoUploadSingleThread') as HTMLInputElement)?.checked ?? false,
         auto_upload_group_by_metadata: (document.getElementById('autoUploadGroupByMetadata') as HTMLInputElement)?.checked ?? true,
         auto_upload_group_by_world: (document.getElementById('autoUploadGroupByWorld') as HTMLInputElement)?.checked ?? true,
@@ -3201,6 +3498,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // Update background queue button visibility based on new setting
       updateBackgroundQueueButtonVisibility(config.enable_auto_upload || false);
+
+      // Update multi-webhook mode and re-render selector
+      const newMultiWebhookEnabled = config.enable_multi_webhook || false;
+      if (state.multiWebhookEnabled !== newMultiWebhookEnabled) {
+        state.multiWebhookEnabled = newMultiWebhookEnabled;
+        // If disabling multi-webhook, trim selection to first only
+        if (!state.multiWebhookEnabled && state.selectedWebhookIds.length > 1) {
+          state.selectedWebhookIds = [state.selectedWebhookIds[0]];
+          state.selectedWebhookId = state.selectedWebhookIds[0] ?? null;
+        }
+        state.updateWebhookSelector();
+      }
 
       state.showSuccess('Settings saved successfully!');
       ModalManager.closeModal('settingsModal');
@@ -3289,9 +3598,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const row = document.createElement('tr');
         row.style.borderBottom = '1px solid var(--border-color)';
         row.innerHTML = `
-          <td style="padding: 4px;"><strong>${label}</strong></td>
+          <td style="padding: 4px;"><strong>${escapeHtml(label)}</strong></td>
           <td style="padding: 4px;">→</td>
-          <td style="padding: 4px;">${webhookName}</td>
+          <td style="padding: 4px;">${escapeHtml(webhookName)}</td>
           <td style="padding: 4px; text-align: right;">
             <button class="btn btn-small btn-secondary delete-override-btn" data-id="${ov.id}">🗑️</button>
           </td>
@@ -3383,6 +3692,114 @@ document.addEventListener('DOMContentLoaded', async () => {
       state.showSuccess(`Linked ${userIdentifier} to webhook!`);
     } catch (error) {
       state.showError(`Failed to add override: ${error}`);
+    }
+  });
+
+  // Discord User Mapping Logic (VRChat player → Discord @mention)
+  async function loadDiscordMappings() {
+    try {
+      const mappings = await invoke<DiscordUserMapping[]>('get_discord_user_mappings');
+      const listContainer = document.getElementById('discordMappingsList');
+      if (!listContainer) return;
+
+      listContainer.innerHTML = '';
+
+      if (mappings.length === 0) {
+        listContainer.innerHTML = '<div style="color: var(--text-muted); padding: 5px; font-style: italic;">No player tags configured.</div>';
+        return;
+      }
+
+      const table = document.createElement('table');
+      table.style.width = '100%';
+      table.style.borderCollapse = 'collapse';
+      table.style.fontSize = '0.9rem';
+
+      mappings.forEach(m => {
+        const label = m.vrchat_display_name || m.vrchat_user_id || 'Unknown';
+        const row = document.createElement('tr');
+        row.style.borderBottom = '1px solid var(--border-color)';
+        row.innerHTML = `
+          <td style="padding: 4px;"><strong>${escapeHtml(label)}</strong></td>
+          <td style="padding: 4px;">→</td>
+          <td style="padding: 4px;"><code>&lt;@${escapeHtml(m.discord_user_id)}&gt;</code></td>
+          <td style="padding: 4px; text-align: right;">
+            <button class="btn btn-small btn-secondary delete-discord-mapping-btn" data-id="${m.id}">🗑️</button>
+          </td>
+        `;
+        table.appendChild(row);
+      });
+
+      listContainer.appendChild(table);
+
+      // Bind delete buttons
+      document.querySelectorAll('.delete-discord-mapping-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const id = parseInt((e.target as HTMLElement).dataset.id || '0');
+          if (id > 0) {
+            try {
+              await invoke('delete_discord_user_mapping', { id });
+              loadDiscordMappings();
+            } catch (err) {
+              state.showError(`Failed to delete mapping: ${err}`);
+            }
+          }
+        });
+      });
+
+    } catch (error) {
+      console.error('Failed to load discord mappings:', error);
+    }
+  }
+
+  // Also load discord mappings when opening webhook modal
+  const manageWebhooksBtnDiscord = document.getElementById('manageWebhooksBtn');
+  manageWebhooksBtnDiscord?.addEventListener('click', () => {
+    loadDiscordMappings();
+  });
+
+  const addDiscordMappingBtn = document.getElementById('addDiscordMappingBtn');
+  addDiscordMappingBtn?.addEventListener('click', async () => {
+    const userInput = document.getElementById('discordMappingUserInput') as HTMLInputElement;
+    const discordIdInput = document.getElementById('discordMappingDiscordId') as HTMLInputElement;
+
+    const userIdentifier = userInput.value.trim();
+    const discordUserId = discordIdInput.value.trim();
+
+    if (!userIdentifier) {
+      state.showError('Please enter a VRChat Name or ID');
+      return;
+    }
+    if (!discordUserId) {
+      state.showError('Please enter a Discord User ID');
+      return;
+    }
+    if (!/^\d+$/.test(discordUserId)) {
+      state.showError('Discord User ID must be numeric (right-click user → Copy User ID)');
+      return;
+    }
+
+    let vrchatUserId: string | null = null;
+    let vrchatDisplayName: string | null = null;
+
+    if (userIdentifier.startsWith('usr_')) {
+      vrchatUserId = userIdentifier;
+    } else {
+      vrchatDisplayName = userIdentifier;
+    }
+
+    try {
+      await invoke('add_discord_user_mapping', {
+        vrchatDisplayName,
+        vrchatUserId,
+        discordUserId,
+      });
+
+      userInput.value = '';
+      discordIdInput.value = '';
+      loadDiscordMappings();
+      state.showSuccess(`Mapped ${userIdentifier} to Discord user!`);
+    } catch (error) {
+      state.showError(`Failed to add mapping: ${error}`);
     }
   });
 

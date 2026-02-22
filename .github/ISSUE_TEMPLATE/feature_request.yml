@@ -8,12 +8,29 @@ body:
       value: |
         Thanks for suggesting a feature! Please describe your idea below.
 
+  - type: dropdown
+    id: area
+    attributes:
+      label: Feature Area
+      description: Which part of the app does this relate to?
+      options:
+        - Upload / Webhooks
+        - Discord Integration (tagging, formatting, forums)
+        - Background Auto-Upload
+        - Image Processing / Compression
+        - Metadata (extraction, editing, grouping)
+        - UI / UX
+        - Settings / Preferences
+        - Other
+    validations:
+      required: false
+
   - type: textarea
     id: description
     attributes:
       label: Feature Description
       description: A clear description of the feature you'd like to see.
-      placeholder: What would you like to be added?
+      placeholder: What would you like to be added or changed?
     validations:
       required: true
 

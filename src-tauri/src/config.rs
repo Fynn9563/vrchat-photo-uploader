@@ -8,6 +8,8 @@ use crate::errors::{AppError, AppResult};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     pub last_webhook_id: Option<i64>,
+    #[serde(default)]
+    pub last_webhook_ids: Vec<i64>,
     pub group_by_metadata: bool,
     pub max_images_per_message: u8,
     pub enable_global_shortcuts: bool,
@@ -24,6 +26,8 @@ pub struct Config {
     pub compression_format: String, // "webp", "lossless_webp", "png", "jpg"
     pub enable_auto_upload: bool,
     pub auto_upload_webhook_id: Option<i64>,
+    #[serde(default)]
+    pub auto_upload_webhook_ids: Vec<i64>,
     pub vrchat_path: Option<String>,
     #[serde(default = "default_false_config")]
     pub single_thread_mode: bool,
@@ -31,6 +35,8 @@ pub struct Config {
     pub merge_no_metadata: bool,
     #[serde(default = "default_false_config")]
     pub default_forum_mode: bool,
+    #[serde(default = "default_false_config")]
+    pub enable_multi_webhook: bool,
     #[serde(default = "default_delay_config")]
     pub auto_upload_delay_seconds: u32,
     #[serde(default = "default_batch_config")]
@@ -83,6 +89,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             last_webhook_id: None,
+            last_webhook_ids: Vec::new(),
             group_by_metadata: true,
             max_images_per_message: 10,
             enable_global_shortcuts: true,
@@ -99,10 +106,12 @@ impl Default for Config {
             compression_format: "webp".to_string(), // WebP by default (better compression)
             enable_auto_upload: false,
             auto_upload_webhook_id: None,
+            auto_upload_webhook_ids: Vec::new(),
             vrchat_path: None,
             single_thread_mode: false,
             merge_no_metadata: false,
             default_forum_mode: false,
+            enable_multi_webhook: false,
             auto_upload_delay_seconds: 5,
             auto_upload_batch_size: 10,
             auto_upload_forum_channel: false,
@@ -122,6 +131,7 @@ impl From<Config> for AppConfig {
     fn from(config: Config) -> Self {
         AppConfig {
             last_webhook_id: config.last_webhook_id,
+            last_webhook_ids: config.last_webhook_ids,
             group_by_metadata: config.group_by_metadata,
             max_images_per_message: config.max_images_per_message,
             enable_global_shortcuts: config.enable_global_shortcuts,
@@ -131,10 +141,12 @@ impl From<Config> for AppConfig {
             compression_format: config.compression_format,
             enable_auto_upload: config.enable_auto_upload,
             auto_upload_webhook_id: config.auto_upload_webhook_id,
+            auto_upload_webhook_ids: config.auto_upload_webhook_ids,
             vrchat_path: config.vrchat_path,
             single_thread_mode: config.single_thread_mode,
             merge_no_metadata: config.merge_no_metadata,
             default_forum_mode: config.default_forum_mode,
+            enable_multi_webhook: config.enable_multi_webhook,
             auto_upload_delay_seconds: config.auto_upload_delay_seconds,
             auto_upload_batch_size: config.auto_upload_batch_size,
             auto_upload_forum_channel: config.auto_upload_forum_channel,
@@ -154,6 +166,7 @@ impl From<AppConfig> for Config {
     fn from(app_config: AppConfig) -> Self {
         Config {
             last_webhook_id: app_config.last_webhook_id,
+            last_webhook_ids: app_config.last_webhook_ids,
             group_by_metadata: app_config.group_by_metadata,
             max_images_per_message: app_config.max_images_per_message,
             enable_global_shortcuts: app_config.enable_global_shortcuts,
@@ -162,10 +175,12 @@ impl From<AppConfig> for Config {
             compression_format: app_config.compression_format,
             enable_auto_upload: app_config.enable_auto_upload,
             auto_upload_webhook_id: app_config.auto_upload_webhook_id,
+            auto_upload_webhook_ids: app_config.auto_upload_webhook_ids,
             vrchat_path: app_config.vrchat_path,
             single_thread_mode: app_config.single_thread_mode,
             merge_no_metadata: app_config.merge_no_metadata,
             default_forum_mode: app_config.default_forum_mode,
+            enable_multi_webhook: app_config.enable_multi_webhook,
             auto_upload_delay_seconds: app_config.auto_upload_delay_seconds,
             auto_upload_batch_size: app_config.auto_upload_batch_size,
             auto_upload_forum_channel: app_config.auto_upload_forum_channel,

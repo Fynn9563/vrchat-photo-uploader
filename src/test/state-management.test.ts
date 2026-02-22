@@ -220,4 +220,182 @@ describe('State Management', () => {
       expect(validTransitions['completed']).toHaveLength(0);
     });
   });
+
+  describe('Multi-Webhook Session Logic', () => {
+    it('should not treat intermediate webhook completion as session completion', () => {
+      // Simulates: 2 files, 2 webhooks, total_images = 4
+      // After webhook 1 completes 2 files: completed=2, total_images=4
+      const progress = createMockUploadProgress({
+        total_images: 4,
+        completed: 2,
+        session_status: 'completed',
+        current_webhook_index: 0,
+        total_webhooks: 2,
+      });
+
+      const allFilesProcessed = progress.completed >= progress.total_images;
+      const isLastWebhook = progress.current_webhook_index >= progress.total_webhooks - 1;
+      const sessionCompleted = (progress.session_status === 'completed' && isLastWebhook) ||
+        progress.session_status === 'failed' ||
+        progress.session_status === 'cancelled' ||
+        allFilesProcessed;
+
+      expect(allFilesProcessed).toBe(false);
+      expect(isLastWebhook).toBe(false);
+      expect(sessionCompleted).toBe(false);
+    });
+
+    it('should treat final webhook completion as session completion', () => {
+      // After webhook 2 completes: completed=4, total_images=4
+      const progress = createMockUploadProgress({
+        total_images: 4,
+        completed: 4,
+        session_status: 'completed',
+        current_webhook_index: 1,
+        total_webhooks: 2,
+      });
+
+      const allFilesProcessed = progress.completed >= progress.total_images;
+      const isLastWebhook = progress.current_webhook_index >= progress.total_webhooks - 1;
+      const sessionCompleted = (progress.session_status === 'completed' && isLastWebhook) ||
+        allFilesProcessed;
+
+      expect(allFilesProcessed).toBe(true);
+      expect(isLastWebhook).toBe(true);
+      expect(sessionCompleted).toBe(true);
+    });
+
+    it('should detect webhook transition and reset item states', () => {
+      const items = [
+        createMockQueueItem({ id: '1', filename: 'a.png', status: 'success', selected: true }),
+        createMockQueueItem({ id: '2', filename: 'b.png', status: 'success', selected: true }),
+      ];
+
+      // Simulate webhook transition: index changed from 0 to 1
+      let lastSeenWebhookIndex = 0;
+      const progress = createMockUploadProgress({
+        total_webhooks: 2,
+        current_webhook_index: 1,
+        successful_uploads: [],
+      });
+
+      if (progress.total_webhooks > 1 && progress.current_webhook_index !== lastSeenWebhookIndex) {
+        lastSeenWebhookIndex = progress.current_webhook_index;
+        items.forEach(item => {
+          if (item.selected) {
+            item.status = 'queued';
+            item.progress = 0;
+            item.error = null;
+          }
+        });
+      }
+
+      expect(lastSeenWebhookIndex).toBe(1);
+      expect(items[0].status).toBe('queued');
+      expect(items[1].status).toBe('queued');
+      expect(items[0].progress).toBe(0);
+    });
+
+    it('should not reset items when webhook index stays the same', () => {
+      const items = [
+        createMockQueueItem({ id: '1', filename: 'a.png', status: 'success', selected: true }),
+      ];
+
+      let lastSeenWebhookIndex = 0;
+      const progress = createMockUploadProgress({
+        total_webhooks: 2,
+        current_webhook_index: 0,
+      });
+
+      if (progress.total_webhooks > 1 && progress.current_webhook_index !== lastSeenWebhookIndex) {
+        lastSeenWebhookIndex = progress.current_webhook_index;
+        items.forEach(item => {
+          if (item.selected) {
+            item.status = 'queued';
+            item.progress = 0;
+          }
+        });
+      }
+
+      // No transition detected, items unchanged
+      expect(items[0].status).toBe('success');
+    });
+
+    it('should preserve total_images across webhooks (not overwrite)', () => {
+      // This tests the key bug: total_images must be files * webhooks, not just files
+      const progress = createMockUploadProgress({
+        total_images: 6, // 3 files * 2 webhooks
+        completed: 3,    // webhook 1 done
+        current_webhook_index: 0,
+        total_webhooks: 2,
+        session_status: 'active',
+      });
+
+      // total_images should NOT be overwritten to file count (3)
+      expect(progress.total_images).toBe(6);
+      const allFilesProcessed = progress.completed >= progress.total_images;
+      expect(allFilesProcessed).toBe(false);
+    });
+
+    it('should include webhook name in progress', () => {
+      const progress = createMockUploadProgress({
+        current_webhook_name: 'VRC Photos',
+        current_webhook_index: 1,
+        total_webhooks: 3,
+      });
+
+      const webhookLabel = progress.current_webhook_name
+        ? `${progress.current_webhook_name} (${progress.current_webhook_index + 1}/${progress.total_webhooks})`
+        : `Webhook ${progress.current_webhook_index + 1}/${progress.total_webhooks}`;
+
+      expect(webhookLabel).toBe('VRC Photos (2/3)');
+    });
+
+    it('should fall back to generic label when webhook name is empty', () => {
+      const progress = createMockUploadProgress({
+        current_webhook_name: '',
+        current_webhook_index: 0,
+        total_webhooks: 2,
+      });
+
+      const webhookLabel = progress.current_webhook_name
+        ? `${progress.current_webhook_name} (${progress.current_webhook_index + 1}/${progress.total_webhooks})`
+        : `Webhook ${progress.current_webhook_index + 1}/${progress.total_webhooks}`;
+
+      expect(webhookLabel).toBe('Webhook 1/2');
+    });
+
+    it('should stop on failed status even during multi-webhook', () => {
+      const progress = createMockUploadProgress({
+        total_images: 4,
+        completed: 1,
+        session_status: 'failed',
+        current_webhook_index: 0,
+        total_webhooks: 2,
+      });
+
+      const isLastWebhook = progress.current_webhook_index >= progress.total_webhooks - 1;
+      const sessionCompleted = (progress.session_status === 'completed' && isLastWebhook) ||
+        progress.session_status === 'failed' ||
+        progress.session_status === 'cancelled';
+
+      expect(sessionCompleted).toBe(true);
+    });
+
+    it('should stop on cancelled status even during multi-webhook', () => {
+      const progress = createMockUploadProgress({
+        total_images: 4,
+        completed: 1,
+        session_status: 'cancelled',
+        current_webhook_index: 0,
+        total_webhooks: 2,
+      });
+
+      const sessionCompleted = (progress.session_status === 'completed' && (progress.current_webhook_index >= progress.total_webhooks - 1)) ||
+        progress.session_status === 'failed' ||
+        progress.session_status === 'cancelled';
+
+      expect(sessionCompleted).toBe(true);
+    });
+  });
 });

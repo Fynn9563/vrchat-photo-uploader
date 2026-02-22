@@ -42,7 +42,7 @@
   },
   "productName": "VRChat Photo Uploader",
   "mainBinaryName": "VRChat-Photo-Uploader",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "identifier": "com.vrchat.photo.uploader",
   "plugins": {
     "updater": {
@@ -78,7 +78,7 @@
         ],
         "enable": true
       },
-      "csp": null,
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost blob: data:; connect-src ipc: http://ipc.localhost",
       "pattern": {
         "use": "brownfield"
       }

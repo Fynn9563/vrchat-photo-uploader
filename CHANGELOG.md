@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.1.0] - 2026-02-23
+
+### Added
+- **Multi-webhook upload** — Upload the same photos to multiple Discord webhooks in a single session. Enable in Settings, then select multiple webhooks from the dropdown. Progress shows which webhook is being processed (e.g., "VRC Photos (2/3)")
+- **Discord player tagging (@mentions)** — Map VRChat players to Discord user IDs so they show up as @mentions in your uploads instead of plain text. Manage mappings in the "Discord Player Tagging" section under Manage Webhooks
+- **Webhook pinning** — Pin important webhooks to the top of all dropdown lists. Pin icon appears on hover and persists across sessions
+- **Multi-webhook auto-upload** — Background auto-upload now supports uploading to multiple webhooks when multi-webhook mode is enabled
+
+### Changed
+- **Forum channel is now per-webhook** — Set when adding or editing a webhook, instead of toggling it globally before each upload
+- **Redesigned webhook selector** — New custom dropdown that supports both single and multi-select modes
+- **Single Thread Mode** — Now only shown when a forum channel webhook is selected
+- **Removed "Default Forum Channel mode" setting** — Replaced by "Enable multi-webhook upload" in Settings
+- **Removed auto-upload "Forum Channel" toggle** — Forum behavior is now determined from each webhook's own setting
+- **Webhook selection remembered** — Your multi-webhook selections are saved and restored on startup
+
 ## [4.0.0] - 2026-02-22
 
 ### Added
