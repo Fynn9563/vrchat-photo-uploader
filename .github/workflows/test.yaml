@@ -139,11 +139,14 @@ jobs:
           cd src-tauri
           cargo fmt --all -- --check
 
+      - name: Build frontend (required by Tauri generate_context macro)
+        run: pnpm build
+
       - name: Run Rust linting
         run: |
           echo "🔍 Running Rust linting..."
           cd src-tauri
-          cargo clippy --all-targets --all-features -- -D warnings || echo "⚠️ clippy found issues (non-critical formatting)"
+          cargo clippy --all-targets --all-features -- -D warnings
 
   accessibility-tests:
     runs-on: ubuntu-22.04
