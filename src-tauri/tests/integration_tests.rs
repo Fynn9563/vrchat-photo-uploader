@@ -43,37 +43,31 @@ async fn test_full_image_processing_workflow() {
         // Verify results
         match validation_result {
             Ok(_) => println!("✅ File validation passed"),
-            Err(e) => println!(
-                "⚠️  File validation failed: {e} (acceptable for minimal PNG)"
-            ),
+            Err(e) => println!("⚠️  File validation failed: {e} (acceptable for minimal PNG)"),
         }
 
         match compression_result {
             Ok(needs_compression) => {
-                println!(
-                    "✅ Compression check passed: needs_compression = {needs_compression}"
-                );
+                println!("✅ Compression check passed: needs_compression = {needs_compression}");
                 assert!(
                     !needs_compression,
                     "Small test image should not need compression"
                 );
             }
-            Err(e) => println!(
-                "⚠️  Compression check failed: {e} (might be due to image validation)"
-            ),
+            Err(e) => {
+                println!("⚠️  Compression check failed: {e} (might be due to image validation)")
+            }
         }
 
         match info_result {
             Ok((width, height, size)) => {
-                println!(
-                    "✅ Image info extracted: {width}x{height}, {size} bytes"
-                );
+                println!("✅ Image info extracted: {width}x{height}, {size} bytes");
                 assert_eq!(width, 1, "Test image should be 1 pixel wide");
                 assert_eq!(height, 1, "Test image should be 1 pixel tall");
             }
-            Err(e) => println!(
-                "⚠️  Image info extraction failed: {e} (acceptable for minimal PNG)"
-            ),
+            Err(e) => {
+                println!("⚠️  Image info extraction failed: {e} (acceptable for minimal PNG)")
+            }
         }
 
         match metadata_result {
@@ -83,9 +77,7 @@ async fn test_full_image_processing_workflow() {
             Ok(None) => {
                 println!("✅ No metadata found (expected for test image)");
             }
-            Err(e) => println!(
-                "⚠️  Metadata extraction failed: {e} (expected for test image)"
-            ),
+            Err(e) => println!("⚠️  Metadata extraction failed: {e} (expected for test image)"),
         }
     } else {
         panic!("Failed to create test file");

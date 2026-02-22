@@ -105,7 +105,13 @@ async fn insert_webhook(pool: &Pool<Sqlite>, name: &str, url: &str, is_forum: bo
 #[tokio::test]
 async fn test_insert_webhook_and_get_all() {
     let pool = setup_db().await;
-    let id = insert_webhook(&pool, "Test Hook", "https://discord.com/api/webhooks/1/abc", false).await;
+    let id = insert_webhook(
+        &pool,
+        "Test Hook",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
     assert!(id > 0);
 
     let rows = sqlx::query("SELECT id, name, url, is_forum FROM webhooks ORDER BY name ASC")
@@ -115,14 +121,23 @@ async fn test_insert_webhook_and_get_all() {
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "Test Hook");
-    assert_eq!(rows[0].get::<String, _>("url"), "https://discord.com/api/webhooks/1/abc");
+    assert_eq!(
+        rows[0].get::<String, _>("url"),
+        "https://discord.com/api/webhooks/1/abc"
+    );
     assert!(!rows[0].get::<bool, _>("is_forum"));
 }
 
 #[tokio::test]
 async fn test_insert_duplicate_url_fails() {
     let pool = setup_db().await;
-    insert_webhook(&pool, "Hook 1", "https://discord.com/api/webhooks/1/abc", false).await;
+    insert_webhook(
+        &pool,
+        "Hook 1",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
 
     let result = sqlx::query("INSERT INTO webhooks (name, url, is_forum) VALUES (?, ?, ?)")
         .bind("Hook 2")
@@ -131,13 +146,22 @@ async fn test_insert_duplicate_url_fails() {
         .execute(&pool)
         .await;
 
-    assert!(result.is_err(), "Duplicate URL should fail with UNIQUE constraint");
+    assert!(
+        result.is_err(),
+        "Duplicate URL should fail with UNIQUE constraint"
+    );
 }
 
 #[tokio::test]
 async fn test_insert_duplicate_name_fails() {
     let pool = setup_db().await;
-    insert_webhook(&pool, "Same Name", "https://discord.com/api/webhooks/1/abc", false).await;
+    insert_webhook(
+        &pool,
+        "Same Name",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
 
     let result = sqlx::query("INSERT INTO webhooks (name, url, is_forum) VALUES (?, ?, ?)")
         .bind("Same Name") // same name
@@ -146,13 +170,22 @@ async fn test_insert_duplicate_name_fails() {
         .execute(&pool)
         .await;
 
-    assert!(result.is_err(), "Duplicate name should fail with UNIQUE constraint");
+    assert!(
+        result.is_err(),
+        "Duplicate name should fail with UNIQUE constraint"
+    );
 }
 
 #[tokio::test]
 async fn test_get_webhook_by_id() {
     let pool = setup_db().await;
-    let id = insert_webhook(&pool, "Find Me", "https://discord.com/api/webhooks/1/abc", true).await;
+    let id = insert_webhook(
+        &pool,
+        "Find Me",
+        "https://discord.com/api/webhooks/1/abc",
+        true,
+    )
+    .await;
 
     let row = sqlx::query("SELECT id, name, url, is_forum FROM webhooks WHERE id = ?")
         .bind(id)
@@ -180,7 +213,13 @@ async fn test_get_webhook_by_id_not_found() {
 #[tokio::test]
 async fn test_update_webhook() {
     let pool = setup_db().await;
-    let id = insert_webhook(&pool, "Original", "https://discord.com/api/webhooks/1/abc", false).await;
+    let id = insert_webhook(
+        &pool,
+        "Original",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
 
     sqlx::query("UPDATE webhooks SET name = ?, url = ?, is_forum = ? WHERE id = ?")
         .bind("Updated")
@@ -198,14 +237,23 @@ async fn test_update_webhook() {
         .unwrap();
 
     assert_eq!(row.get::<String, _>("name"), "Updated");
-    assert_eq!(row.get::<String, _>("url"), "https://discord.com/api/webhooks/2/def");
+    assert_eq!(
+        row.get::<String, _>("url"),
+        "https://discord.com/api/webhooks/2/def"
+    );
     assert!(row.get::<bool, _>("is_forum"));
 }
 
 #[tokio::test]
 async fn test_delete_webhook() {
     let pool = setup_db().await;
-    let id = insert_webhook(&pool, "Delete Me", "https://discord.com/api/webhooks/1/abc", false).await;
+    let id = insert_webhook(
+        &pool,
+        "Delete Me",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
 
     let result = sqlx::query("DELETE FROM webhooks WHERE id = ?")
         .bind(id)
@@ -225,7 +273,13 @@ async fn test_delete_webhook() {
 #[tokio::test]
 async fn test_update_webhook_usage() {
     let pool = setup_db().await;
-    let id = insert_webhook(&pool, "Used Hook", "https://discord.com/api/webhooks/1/abc", false).await;
+    let id = insert_webhook(
+        &pool,
+        "Used Hook",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
 
     // Update usage twice
     for _ in 0..2 {
@@ -251,7 +305,13 @@ async fn test_update_webhook_usage() {
 #[tokio::test]
 async fn test_record_upload_success() {
     let pool = setup_db().await;
-    let webhook_id = insert_webhook(&pool, "Hook", "https://discord.com/api/webhooks/1/abc", false).await;
+    let webhook_id = insert_webhook(
+        &pool,
+        "Hook",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
 
     sqlx::query(
         r#"INSERT INTO upload_history
@@ -269,11 +329,12 @@ async fn test_record_upload_success() {
     .await
     .unwrap();
 
-    let row = sqlx::query("SELECT file_path, upload_status FROM upload_history WHERE webhook_id = ?")
-        .bind(webhook_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let row =
+        sqlx::query("SELECT file_path, upload_status FROM upload_history WHERE webhook_id = ?")
+            .bind(webhook_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
 
     assert_eq!(row.get::<String, _>("file_path"), "/photos/test.png");
     assert_eq!(row.get::<String, _>("upload_status"), "success");
@@ -282,7 +343,13 @@ async fn test_record_upload_success() {
 #[tokio::test]
 async fn test_record_upload_failure() {
     let pool = setup_db().await;
-    let webhook_id = insert_webhook(&pool, "Hook", "https://discord.com/api/webhooks/1/abc", false).await;
+    let webhook_id = insert_webhook(
+        &pool,
+        "Hook",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
 
     sqlx::query(
         r#"INSERT INTO upload_history
@@ -298,11 +365,12 @@ async fn test_record_upload_failure() {
     .await
     .unwrap();
 
-    let row = sqlx::query("SELECT upload_status, error_message FROM upload_history WHERE file_name = ?")
-        .bind("fail.png")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let row =
+        sqlx::query("SELECT upload_status, error_message FROM upload_history WHERE file_name = ?")
+            .bind("fail.png")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
 
     assert_eq!(row.get::<String, _>("upload_status"), "failed");
     assert_eq!(row.get::<String, _>("error_message"), "Network timeout");
@@ -311,7 +379,13 @@ async fn test_record_upload_failure() {
 #[tokio::test]
 async fn test_create_upload_session() {
     let pool = setup_db().await;
-    let webhook_id = insert_webhook(&pool, "Hook", "https://discord.com/api/webhooks/1/abc", false).await;
+    let webhook_id = insert_webhook(
+        &pool,
+        "Hook",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
 
     sqlx::query("INSERT INTO upload_sessions (id, webhook_id, total_files) VALUES (?, ?, ?)")
         .bind("session_001")
@@ -321,11 +395,12 @@ async fn test_create_upload_session() {
         .await
         .unwrap();
 
-    let row = sqlx::query("SELECT id, total_files, session_status FROM upload_sessions WHERE id = ?")
-        .bind("session_001")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let row =
+        sqlx::query("SELECT id, total_files, session_status FROM upload_sessions WHERE id = ?")
+            .bind("session_001")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
 
     assert_eq!(row.get::<String, _>("id"), "session_001");
     assert_eq!(row.get::<i32, _>("total_files"), 10);
@@ -335,7 +410,13 @@ async fn test_create_upload_session() {
 #[tokio::test]
 async fn test_update_upload_session_progress() {
     let pool = setup_db().await;
-    let webhook_id = insert_webhook(&pool, "Hook", "https://discord.com/api/webhooks/1/abc", false).await;
+    let webhook_id = insert_webhook(
+        &pool,
+        "Hook",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
 
     sqlx::query("INSERT INTO upload_sessions (id, webhook_id, total_files) VALUES (?, ?, ?)")
         .bind("session_002")
@@ -378,7 +459,13 @@ async fn test_update_upload_session_progress() {
 #[tokio::test]
 async fn test_session_completes_when_all_files_done() {
     let pool = setup_db().await;
-    let webhook_id = insert_webhook(&pool, "Hook", "https://discord.com/api/webhooks/1/abc", false).await;
+    let webhook_id = insert_webhook(
+        &pool,
+        "Hook",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
 
     sqlx::query("INSERT INTO upload_sessions (id, webhook_id, total_files) VALUES (?, ?, ?)")
         .bind("session_complete")
@@ -419,7 +506,13 @@ async fn test_session_completes_when_all_files_done() {
 #[tokio::test]
 async fn test_is_file_processed() {
     let pool = setup_db().await;
-    let webhook_id = insert_webhook(&pool, "Hook", "https://discord.com/api/webhooks/1/abc", false).await;
+    let webhook_id = insert_webhook(
+        &pool,
+        "Hook",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
 
     // File not processed yet
     let row = sqlx::query("SELECT COUNT(*) as count FROM upload_history WHERE file_path = ? AND upload_status = 'success'")
@@ -455,7 +548,13 @@ async fn test_is_file_processed() {
 #[tokio::test]
 async fn test_user_webhook_override_crud() {
     let pool = setup_db().await;
-    let webhook_id = insert_webhook(&pool, "Hook", "https://discord.com/api/webhooks/1/abc", false).await;
+    let webhook_id = insert_webhook(
+        &pool,
+        "Hook",
+        "https://discord.com/api/webhooks/1/abc",
+        false,
+    )
+    .await;
 
     // Add override
     let result = sqlx::query(
@@ -480,8 +579,14 @@ async fn test_user_webhook_override_crud() {
     .unwrap();
 
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].get::<Option<String>, _>("user_id"), Some("usr_test123".to_string()));
-    assert_eq!(rows[0].get::<Option<String>, _>("user_display_name"), Some("TestUser".to_string()));
+    assert_eq!(
+        rows[0].get::<Option<String>, _>("user_id"),
+        Some("usr_test123".to_string())
+    );
+    assert_eq!(
+        rows[0].get::<Option<String>, _>("user_display_name"),
+        Some("TestUser".to_string())
+    );
 
     // Delete override
     let result = sqlx::query("DELETE FROM user_webhook_overrides WHERE id = ?")
@@ -502,16 +607,32 @@ async fn test_user_webhook_override_crud() {
 #[tokio::test]
 async fn test_multiple_webhooks_ordering() {
     let pool = setup_db().await;
-    insert_webhook(&pool, "Zebra", "https://discord.com/api/webhooks/1/a", false).await;
-    insert_webhook(&pool, "Alpha", "https://discord.com/api/webhooks/2/b", false).await;
-    insert_webhook(&pool, "Middle", "https://discord.com/api/webhooks/3/c", false).await;
-
-    let rows = sqlx::query(
-        "SELECT name FROM webhooks ORDER BY last_used_at DESC, name ASC",
+    insert_webhook(
+        &pool,
+        "Zebra",
+        "https://discord.com/api/webhooks/1/a",
+        false,
     )
-    .fetch_all(&pool)
-    .await
-    .unwrap();
+    .await;
+    insert_webhook(
+        &pool,
+        "Alpha",
+        "https://discord.com/api/webhooks/2/b",
+        false,
+    )
+    .await;
+    insert_webhook(
+        &pool,
+        "Middle",
+        "https://discord.com/api/webhooks/3/c",
+        false,
+    )
+    .await;
+
+    let rows = sqlx::query("SELECT name FROM webhooks ORDER BY last_used_at DESC, name ASC")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
 
     // All have NULL last_used_at, so they should be ordered by name ASC
     assert_eq!(rows.len(), 3);

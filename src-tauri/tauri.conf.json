@@ -22,7 +22,6 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.icns",
       "icons/icon.ico"
     ],
     "resources": [],
@@ -31,14 +30,6 @@
     "category": "Utility",
     "shortDescription": "Upload VRChat photos to Discord webhooks",
     "longDescription": "A modern application to efficiently upload VRChat screenshots to Discord webhooks with metadata support and smart grouping features.",
-    "macOS": {
-      "frameworks": [],
-      "minimumSystemVersion": "",
-      "exceptionDomain": "",
-      "signingIdentity": null,
-      "providerShortName": null,
-      "entitlements": null
-    },
     "linux": {
       "deb": {
         "depends": []
@@ -65,8 +56,7 @@
     "withGlobalTauri": false,
     "trayIcon": {
       "iconPath": "icons/icon.png",
-      "iconAsTemplate": true,
-      "menuOnLeftClick": false
+      "iconAsTemplate": true
     },
     "windows": [
       {

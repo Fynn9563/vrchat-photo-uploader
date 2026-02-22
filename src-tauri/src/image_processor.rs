@@ -100,9 +100,7 @@ pub async fn extract_metadata(file_path: &str) -> AppResult<Option<ImageMetadata
                 return Ok(Some(metadata));
             }
             Err(e) => {
-                log::warn!(
-                    "Failed to parse VRCX metadata JSON from {file_path}: {e}"
-                );
+                log::warn!("Failed to parse VRCX metadata JSON from {file_path}: {e}");
                 log::debug!("Raw JSON that failed to parse (full): {metadata_json}");
                 log::debug!("JSON length: {} bytes", metadata_json.len());
                 log::debug!(
@@ -133,9 +131,7 @@ pub async fn extract_metadata(file_path: &str) -> AppResult<Option<ImageMetadata
     // Priority 2: Try to get VRChat native XMP metadata
     log::info!("Trying VRChat XMP metadata extraction for {file_path}");
     if let Some(xmp_metadata) = extract_vrchat_xmp_metadata(file_path)? {
-        log::info!(
-            "Successfully extracted VRChat XMP metadata from {file_path}"
-        );
+        log::info!("Successfully extracted VRChat XMP metadata from {file_path}");
         return Ok(Some(xmp_metadata));
     } else {
         log::info!("No VRChat XMP metadata found in {file_path}");
@@ -214,9 +210,7 @@ fn get_png_description(file_path: &str) -> AppResult<Option<String>> {
 
             // Try to extract Description from this chunk
             if let Some(description) = extract_description_from_chunk(chunk_type_str, &chunk_data) {
-                log::info!(
-                    "Successfully extracted Description from {chunk_type_str} chunk!"
-                );
+                log::info!("Successfully extracted Description from {chunk_type_str} chunk!");
                 log::debug!("Description length: {} bytes", description.len());
                 return Ok(Some(description));
             } else {
@@ -453,9 +447,7 @@ fn decompress_deflate_data(compressed_data: &[u8]) -> Option<String> {
 /// - XMP:WorldID
 /// - XMP:WorldDisplayName
 fn extract_vrchat_xmp_metadata(file_path: &str) -> AppResult<Option<ImageMetadata>> {
-    log::debug!(
-        "Attempting to extract VRChat XMP metadata from: {file_path}"
-    );
+    log::debug!("Attempting to extract VRChat XMP metadata from: {file_path}");
 
     let file = fs::File::open(file_path)?;
     let mut reader = BufReader::new(file);
@@ -825,9 +817,7 @@ fn parse_vrchat_metadata(json: serde_json::Value) -> AppResult<ImageMetadata> {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        log::debug!(
-            "Found world: {world_name} ({world_id}) - Instance: {instance_id}"
-        );
+        log::debug!("Found world: {world_name} ({world_id}) - Instance: {instance_id}");
 
         metadata.world = Some(WorldInfo {
             name: world_name.to_string(),
@@ -915,9 +905,7 @@ pub async fn resize_image_simple(file_path: &str, scale: f32) -> AppResult<Strin
     let new_width = (img.width() as f32 * scale) as u32;
     let new_height = (img.height() as f32 * scale) as u32;
 
-    log::info!(
-        "Resizing image to {new_width}x{new_height} (scale {scale:.2})"
-    );
+    log::info!("Resizing image to {new_width}x{new_height} (scale {scale:.2})");
 
     // Use Triangle (bilinear) as a fast "box-like" filter
     let resized = img.resize_exact(new_width, new_height, image::imageops::FilterType::Triangle);
@@ -978,9 +966,7 @@ async fn compress_image_with_format_internal(
         const SMART_RESIZE_THRESHOLD: u64 = 10 * 1024 * 1024; // 10MB
 
         if file_size > SMART_RESIZE_THRESHOLD {
-            log::info!(
-                "Smart PNG: File size {file_size} > 10MB, applying Box resizing (50%)"
-            );
+            log::info!("Smart PNG: File size {file_size} > 10MB, applying Box resizing (50%)");
             return resize_image_box(file_path, 0.5).await;
         } else {
             // Check if it's already a PNG to avoid re-encoding
@@ -995,9 +981,7 @@ async fn compress_image_with_format_internal(
                     .await
                     .map_err(AppError::Io)?;
             } else {
-                log::info!(
-                    "Smart PNG: File size {file_size} <= 10MB but not PNG, converting"
-                );
+                log::info!("Smart PNG: File size {file_size} <= 10MB but not PNG, converting");
                 let file_path_owned = file_path.to_string();
                 let output_path_clone = output_path.clone();
                 tokio::task::spawn_blocking(move || {
@@ -1017,9 +1001,7 @@ async fn compress_image_with_format_internal(
         let output_path = temp_path.with_extension("png");
 
         if is_already_png && file_size <= 10 * 1024 * 1024 {
-            log::info!(
-                "PNG: File size {file_size} <= 10MB and already PNG, fast-copying"
-            );
+            log::info!("PNG: File size {file_size} <= 10MB and already PNG, fast-copying");
             tokio::fs::copy(file_path, &output_path)
                 .await
                 .map_err(AppError::Io)?;
@@ -1154,9 +1136,7 @@ pub async fn resize_image_box(file_path: &str, scale: f32) -> AppResult<String> 
         let width = (img.width() as f32 * scale) as u32;
         let height = (img.height() as f32 * scale) as u32;
 
-        log::info!(
-            "Resizing {file_path_owned} to {width}x{height} (Lanczos3)"
-        );
+        log::info!("Resizing {file_path_owned} to {width}x{height} (Lanczos3)");
 
         // Using Lanczos3 for high quality downscaling (better than Box for photos)
         let resized = img.resize(width, height, image::imageops::FilterType::Lanczos3);
@@ -1346,9 +1326,7 @@ pub fn get_timestamp_from_filename(file_path: &str) -> Option<i64> {
         if let Ok(created) = metadata.created() {
             if let Ok(duration) = created.duration_since(std::time::UNIX_EPOCH) {
                 let timestamp = duration.as_secs() as i64;
-                log::debug!(
-                    "Using file creation time: {timestamp} (Discord: <t:{timestamp}:f>)"
-                );
+                log::debug!("Using file creation time: {timestamp} (Discord: <t:{timestamp}:f>)");
                 return Some(timestamp);
             }
         }
@@ -1376,9 +1354,7 @@ pub fn get_image_info(file_path: &str) -> AppResult<(u32, u32, u64)> {
 pub fn generate_thumbnail(file_path: &str, max_dimension: u32) -> AppResult<String> {
     InputValidator::validate_image_file(file_path)?;
 
-    log::debug!(
-        "Generating thumbnail for {file_path} with max dimension {max_dimension}"
-    );
+    log::debug!("Generating thumbnail for {file_path} with max dimension {max_dimension}");
 
     // Load the image
     let img = image::open(file_path)?;
@@ -1584,7 +1560,7 @@ mod tests {
         let result = parse_vrchat_metadata(invalid_json);
         // Should handle invalid JSON gracefully
         // Both success and failure are acceptable for invalid JSON
-        if let Ok(_) = result {
+        if result.is_ok() {
             // Might succeed with empty metadata
         }
         // Might fail, both outcomes are acceptable

@@ -447,11 +447,17 @@ mod tests {
         let config = Config::default();
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: Config = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.max_images_per_message, config.max_images_per_message);
+        assert_eq!(
+            deserialized.max_images_per_message,
+            config.max_images_per_message
+        );
         assert_eq!(deserialized.upload_quality, config.upload_quality);
         assert_eq!(deserialized.theme, config.theme);
         assert_eq!(deserialized.compression_format, config.compression_format);
-        assert_eq!(deserialized.auto_upload_delay_seconds, config.auto_upload_delay_seconds);
+        assert_eq!(
+            deserialized.auto_upload_delay_seconds,
+            config.auto_upload_delay_seconds
+        );
     }
 
     #[test]
@@ -513,82 +519,110 @@ mod tests {
 
     #[test]
     fn test_validate_config_invalid_max_images_zero() {
-        let mut config = Config::default();
-        config.max_images_per_message = 0;
+        let config = Config {
+            max_images_per_message: 0,
+            ..Config::default()
+        };
         assert!(validate_config(&config).is_err());
     }
 
     #[test]
     fn test_validate_config_invalid_max_images_over_10() {
-        let mut config = Config::default();
-        config.max_images_per_message = 11;
+        let config = Config {
+            max_images_per_message: 11,
+            ..Config::default()
+        };
         assert!(validate_config(&config).is_err());
     }
 
     #[test]
     fn test_validate_config_invalid_quality_zero() {
-        let mut config = Config::default();
-        config.upload_quality = 0;
+        let config = Config {
+            upload_quality: 0,
+            ..Config::default()
+        };
         assert!(validate_config(&config).is_err());
     }
 
     #[test]
     fn test_validate_config_invalid_quality_over_100() {
-        let mut config = Config::default();
-        config.upload_quality = 101;
+        let config = Config {
+            upload_quality: 101,
+            ..Config::default()
+        };
         assert!(validate_config(&config).is_err());
     }
 
     #[test]
     fn test_validate_config_invalid_theme() {
-        let mut config = Config::default();
-        config.theme = "purple".to_string();
+        let config = Config {
+            theme: "purple".to_string(),
+            ..Config::default()
+        };
         assert!(validate_config(&config).is_err());
     }
 
     #[test]
     fn test_validate_config_valid_themes() {
         for theme in &["dark", "light", "auto"] {
-            let mut config = Config::default();
-            config.theme = theme.to_string();
-            assert!(validate_config(&config).is_ok(), "Theme '{theme}' should be valid");
+            let config = Config {
+                theme: theme.to_string(),
+                ..Config::default()
+            };
+            assert!(
+                validate_config(&config).is_ok(),
+                "Theme '{theme}' should be valid"
+            );
         }
     }
 
     #[test]
     fn test_validate_config_invalid_compression_format() {
-        let mut config = Config::default();
-        config.compression_format = "bmp".to_string();
+        let config = Config {
+            compression_format: "bmp".to_string(),
+            ..Config::default()
+        };
         assert!(validate_config(&config).is_err());
     }
 
     #[test]
     fn test_validate_config_valid_compression_formats() {
         for fmt in &["webp", "lossless_webp", "png", "jpg", "avif"] {
-            let mut config = Config::default();
-            config.compression_format = fmt.to_string();
-            assert!(validate_config(&config).is_ok(), "Format '{fmt}' should be valid");
+            let config = Config {
+                compression_format: fmt.to_string(),
+                ..Config::default()
+            };
+            assert!(
+                validate_config(&config).is_ok(),
+                "Format '{fmt}' should be valid"
+            );
         }
     }
 
     #[test]
     fn test_validate_config_invalid_rate_limit() {
-        let mut config = Config::default();
-        config.rate_limit_delay_ms = 50; // Below 100ms minimum
+        let config = Config {
+            rate_limit_delay_ms: 50, // Below 100ms minimum
+            ..Config::default()
+        };
         assert!(validate_config(&config).is_err());
     }
 
     #[test]
     fn test_validate_config_invalid_retry_attempts() {
-        let mut config = Config::default();
-        config.max_retry_attempts = 11; // Over 10
+        let config = Config {
+            max_retry_attempts: 11, // Over 10
+            ..Config::default()
+        };
         assert!(validate_config(&config).is_err());
     }
 
     #[test]
     fn test_validate_config_invalid_log_level() {
-        let mut config = Config::default();
-        config.log_level = "verbose".to_string();
+        let config = Config {
+            log_level: "verbose".to_string(),
+            ..Config::default()
+        };
         assert!(validate_config(&config).is_err());
     }
 }

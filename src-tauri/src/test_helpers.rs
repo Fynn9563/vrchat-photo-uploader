@@ -373,9 +373,9 @@ mod tests {
 
     #[test]
     fn test_create_test_metadata_produces_valid_json() {
-        let json = create_test_metadata("wrld_test123", "Test World", &["Alice", "Bob"], 1705312200);
-        let parsed: serde_json::Value =
-            serde_json::from_str(&json).expect("Should be valid JSON");
+        let json =
+            create_test_metadata("wrld_test123", "Test World", &["Alice", "Bob"], 1705312200);
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("Should be valid JSON");
         assert_eq!(parsed["world"]["id"], "wrld_test123");
         assert_eq!(parsed["world"]["name"], "Test World");
         assert_eq!(parsed["players"].as_array().unwrap().len(), 2);

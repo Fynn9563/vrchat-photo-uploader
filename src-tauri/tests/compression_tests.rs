@@ -158,15 +158,15 @@ fn test_get_image_info_returns_correct_dimensions_for_larger_png() {
     let png = create_png_of_size(10_000);
     let tmp = create_temp_png(&png, "info_larger.png");
 
-    let (width, height, file_size) = image_processor::get_image_info(&tmp.path_str())
-        .expect("get_image_info should succeed");
+    let (width, height, file_size) =
+        image_processor::get_image_info(&tmp.path_str()).expect("get_image_info should succeed");
 
-    assert_eq!(width, 100, "Width should be 100 as set by create_png_of_size");
-    assert!(height >= 1, "Height should be at least 1");
-    assert!(
-        file_size > 0,
-        "File size should be positive"
+    assert_eq!(
+        width, 100,
+        "Width should be 100 as set by create_png_of_size"
     );
+    assert!(height >= 1, "Height should be at least 1");
+    assert!(file_size > 0, "File size should be positive");
 }
 
 #[test]
@@ -282,8 +282,8 @@ async fn test_compress_with_scale_one_preserves_dimensions() {
     let png = create_png_of_size(10_000);
     let tmp = create_temp_png(&png, "compress_scale1_src.png");
 
-    let (orig_w, orig_h, _) = image_processor::get_image_info(&tmp.path_str())
-        .expect("get_image_info should succeed");
+    let (orig_w, orig_h, _) =
+        image_processor::get_image_info(&tmp.path_str()).expect("get_image_info should succeed");
 
     // Scale 1.0 should leave dimensions unchanged.
     let output_path =

@@ -388,12 +388,11 @@ mod tests {
 
         assert_eq!(parsed["world"]["name"], "Test World");
         assert_eq!(parsed["world"]["id"], "wrld_test456");
-        assert_eq!(
-            parsed["world"]["instanceId"],
-            "12345~private(usr_test123)"
-        );
+        assert_eq!(parsed["world"]["instanceId"], "12345~private(usr_test123)");
 
-        let players = parsed["players"].as_array().expect("players should be array");
+        let players = parsed["players"]
+            .as_array()
+            .expect("players should be array");
         assert_eq!(players.len(), 2);
         assert_eq!(players[0]["displayName"], "Alice");
         assert_eq!(players[1]["displayName"], "Bob");
@@ -550,8 +549,8 @@ mod tests {
 
         // Inject new metadata
         let new_metadata = r#"{"application":"VRChat Photo Uploader","version":2,"new":"data"}"#;
-        let result = inject_png_metadata(&png_with_meta, new_metadata)
-            .expect("Should inject new metadata");
+        let result =
+            inject_png_metadata(&png_with_meta, new_metadata).expect("Should inject new metadata");
 
         let result_str = String::from_utf8_lossy(&result);
 
@@ -617,10 +616,7 @@ mod tests {
         let mut buf = Vec::new();
         let long_keyword = "a".repeat(80); // PNG spec: max 79 bytes
         let result = insert_text_chunk(&mut buf, &long_keyword, "text");
-        assert!(
-            result.is_err(),
-            "Keyword over 79 bytes should be rejected"
-        );
+        assert!(result.is_err(), "Keyword over 79 bytes should be rejected");
     }
 
     #[test]
@@ -628,7 +624,10 @@ mod tests {
         let mut buf = Vec::new();
         let keyword_79 = "a".repeat(79); // Exactly at the limit
         let result = insert_text_chunk(&mut buf, &keyword_79, "text");
-        assert!(result.is_ok(), "Keyword of exactly 79 bytes should be accepted");
+        assert!(
+            result.is_ok(),
+            "Keyword of exactly 79 bytes should be accepted"
+        );
     }
 
     // -----------------------------------------------------------------------

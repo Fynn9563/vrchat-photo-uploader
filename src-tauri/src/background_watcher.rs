@@ -363,11 +363,7 @@ fn is_new_image_event(event: &Event) -> bool {
     // 1. New files created (Create)
     // 2. Files finished being written/moved (Modify)
     // 3. Files renamed/moved (Modify(Name))
-    match event.kind {
-        EventKind::Create(_) => true,
-        EventKind::Modify(_) => true,
-        _ => false,
-    }
+    matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_))
 }
 
 fn is_image_file(path: &str) -> bool {
@@ -447,9 +443,7 @@ async fn process_auto_upload_batch(
                 valid_paths.push(path);
             }
             Err(e) => {
-                log::warn!(
-                    "Failed to check if file is processed: {e}. Proceeding anyway."
-                );
+                log::warn!("Failed to check if file is processed: {e}. Proceeding anyway.");
                 valid_paths.push(path);
             }
         }
@@ -583,38 +577,63 @@ mod tests {
     #[test]
     fn test_ignored_match() {
         let ignored = vec!["Thumbnails".to_string()];
-        assert!(is_in_ignored_folder("/home/photos/Thumbnails/image.png", &ignored));
+        assert!(is_in_ignored_folder(
+            "/home/photos/Thumbnails/image.png",
+            &ignored
+        ));
     }
 
     #[test]
     fn test_ignored_case_insensitive() {
         let ignored = vec!["thumbnails".to_string()];
-        assert!(is_in_ignored_folder("/home/photos/THUMBNAILS/image.png", &ignored));
+        assert!(is_in_ignored_folder(
+            "/home/photos/THUMBNAILS/image.png",
+            &ignored
+        ));
     }
 
     #[test]
     fn test_ignored_no_match() {
         let ignored = vec!["Thumbnails".to_string()];
-        assert!(!is_in_ignored_folder("/home/photos/FullSize/image.png", &ignored));
+        assert!(!is_in_ignored_folder(
+            "/home/photos/FullSize/image.png",
+            &ignored
+        ));
     }
 
     #[test]
     fn test_ignored_nested_path() {
         let ignored = vec!["temp".to_string()];
-        assert!(is_in_ignored_folder("/home/photos/2024/temp/image.png", &ignored));
+        assert!(is_in_ignored_folder(
+            "/home/photos/2024/temp/image.png",
+            &ignored
+        ));
     }
 
     #[test]
     fn test_ignored_partial_name_no_match() {
         let ignored = vec!["temp".to_string()];
         // "temporary" contains "temp" but is a different folder name - should NOT match
-        assert!(!is_in_ignored_folder("/home/photos/temporary/image.png", &ignored));
+        assert!(!is_in_ignored_folder(
+            "/home/photos/temporary/image.png",
+            &ignored
+        ));
     }
 
     #[test]
     fn test_ignored_multiple_folders() {
-        let ignored = vec!["temp".to_string(), "cache".to_string(), "Thumbnails".to_string()];
-        assert!(is_in_ignored_folder("/home/photos/cache/image.png", &ignored));
-        assert!(!is_in_ignored_folder("/home/photos/originals/image.png", &ignored));
+        let ignored = vec![
+            "temp".to_string(),
+            "cache".to_string(),
+            "Thumbnails".to_string(),
+        ];
+        assert!(is_in_ignored_folder(
+            "/home/photos/cache/image.png",
+            &ignored
+        ));
+        assert!(!is_in_ignored_folder(
+            "/home/photos/originals/image.png",
+            &ignored
+        ));
     }
 }

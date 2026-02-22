@@ -126,9 +126,7 @@ impl DiscordClient {
                     self.calculate_backoff_delay(attempt)
                 };
 
-                log::warn!(
-                    "Upload attempt {attempt} failed, retrying in {delay:?}: {error}"
-                );
+                log::warn!("Upload attempt {attempt} failed, retrying in {delay:?}: {error}");
                 sleep(delay).await;
                 continue;
             }
@@ -181,9 +179,7 @@ impl DiscordClient {
 
             if status.is_success() {
                 let response_text = response.text().await?;
-                log::info!(
-                    "✅ Forum text message sent successfully. Response: {response_text}"
-                );
+                log::info!("✅ Forum text message sent successfully. Response: {response_text}");
                 return Ok(response_text);
             }
 
@@ -205,9 +201,7 @@ impl DiscordClient {
                     self.calculate_backoff_delay(attempt)
                 };
 
-                log::warn!(
-                    "Forum text message attempt {attempt} failed, retrying in {delay:?}"
-                );
+                log::warn!("Forum text message attempt {attempt} failed, retrying in {delay:?}");
                 sleep(delay).await;
                 continue;
             }
@@ -282,9 +276,7 @@ impl DiscordClient {
                     self.calculate_backoff_delay(attempt)
                 };
 
-                log::warn!(
-                    "Text message attempt {attempt} failed, retrying in {delay:?}"
-                );
+                log::warn!("Text message attempt {attempt} failed, retrying in {delay:?}");
                 sleep(delay).await;
                 continue;
             }
@@ -523,9 +515,7 @@ pub fn extract_thread_id(response_data: &str) -> Option<String> {
 
     // 2. Try 'channel_id' (common for forum message responses)
     if let Some(channel_id) = json.get("channel_id").and_then(|v| v.as_str()) {
-        log::info!(
-            "🎉 Extracted thread_id from 'channel_id' field: {channel_id}"
-        );
+        log::info!("🎉 Extracted thread_id from 'channel_id' field: {channel_id}");
         return Some(channel_id.to_string());
     }
 
@@ -614,10 +604,7 @@ mod tests {
     fn test_parse_error_unknown_code_with_message() {
         let error = r#"{"code": 99999, "message": "Something weird happened"}"#;
         let result = parse_discord_error_message(error, 400);
-        assert!(
-            result.contains("99999"),
-            "Should contain code: {result}"
-        );
+        assert!(result.contains("99999"), "Should contain code: {result}");
         assert!(
             result.contains("Something weird happened"),
             "Should contain message: {result}"

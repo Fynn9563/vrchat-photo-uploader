@@ -654,9 +654,7 @@ pub async fn cleanup_temp_files(temp_filenames: Vec<String>) -> Result<(), Strin
 pub async fn debug_extract_metadata(file_path: String) -> Result<String, String> {
     InputValidator::validate_image_file(&file_path)?;
 
-    log::info!(
-        "DEBUG: Starting detailed metadata extraction for {file_path}"
-    );
+    log::info!("DEBUG: Starting detailed metadata extraction for {file_path}");
 
     match image_processor::extract_metadata(&file_path).await {
         Ok(Some(metadata)) => {
@@ -786,9 +784,7 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<(), Strin
                     .await
                 {
                     Ok(()) => {
-                        log::info!(
-                            "Update downloaded and installed successfully, restarting..."
-                        );
+                        log::info!("Update downloaded and installed successfully, restarting...");
                         app_handle.restart();
                     }
                     Err(e) => {

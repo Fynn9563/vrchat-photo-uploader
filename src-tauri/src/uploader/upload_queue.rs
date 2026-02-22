@@ -33,9 +33,7 @@ pub async fn process_upload_queue(
     let client = DiscordClient::new();
 
     log::info!("Starting upload session {session_id}");
-    log::info!(
-        "Single Thread Mode: {single_thread_mode}, Merge No Metadata: {merge_no_metadata}"
-    );
+    log::info!("Single Thread Mode: {single_thread_mode}, Merge No Metadata: {merge_no_metadata}");
 
     // Initial progress update
     update_progress(
@@ -68,9 +66,7 @@ pub async fn process_upload_queue(
 
     // Initial cancellation check
     if is_session_cancelled(&progress_state, &session_id) {
-        log::info!(
-            "Session {session_id} was cancelled before processing started"
-        );
+        log::info!("Session {session_id} was cancelled before processing started");
         mark_session_cancelled(&progress_state, &session_id);
         return;
     }
@@ -80,9 +76,7 @@ pub async fn process_upload_queue(
     for (i, file_path) in file_paths.iter().enumerate() {
         // Check cancellation every few files during validation
         if i % 5 == 0 && is_session_cancelled(&progress_state, &session_id) {
-            log::info!(
-                "Session {session_id} cancelled during file validation at file {i}"
-            );
+            log::info!("Session {session_id} cancelled during file validation at file {i}");
             mark_session_cancelled(&progress_state, &session_id);
             return;
         }
@@ -170,9 +164,7 @@ pub async fn process_upload_queue(
     let mut total_processed = 0;
     let total_groups = groups.len();
 
-    log::info!(
-        "Processing {total_groups} groups for session {session_id}"
-    );
+    log::info!("Processing {total_groups} groups for session {session_id}");
 
     // Load overrides
     let overrides = database::get_user_webhook_overrides()
@@ -897,9 +889,7 @@ async fn process_image_group_with_failure_handling(
         // Update progress to show current files being uploaded/compressed
         for (file_index, file_path) in chunk.iter().enumerate() {
             if is_session_cancelled(progress_state, session_id) {
-                log::info!(
-                    "❌ Session {session_id} cancelled while updating progress"
-                );
+                log::info!("❌ Session {session_id} cancelled while updating progress");
                 return (false, None);
             }
 
@@ -951,9 +941,7 @@ async fn process_image_group_with_failure_handling(
         {
             Ok(response_data) => {
                 if is_session_cancelled(progress_state, session_id) {
-                    log::info!(
-                        "❌ Session {session_id} cancelled after successful chunk upload"
-                    );
+                    log::info!("❌ Session {session_id} cancelled after successful chunk upload");
                     return (false, None);
                 }
 
@@ -1220,9 +1208,7 @@ pub async fn upload_image_chunk_with_thread_id(
 
     match result {
         Ok(response) => {
-            log::info!(
-                "Upload successful without compression for session {session_id}"
-            );
+            log::info!("Upload successful without compression for session {session_id}");
             Ok(response)
         }
         Err(e) => {

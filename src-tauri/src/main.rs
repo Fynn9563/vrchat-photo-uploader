@@ -105,16 +105,14 @@ fn main() {
                     tauri_plugin_global_shortcut::Builder::new()
                         .with_handler(move |_app, shortcut, event| {
                             if event.state == ShortcutState::Pressed
-                                && shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyU)
+                                && shortcut
+                                    .matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyU)
                             {
                                 log::info!("Global shortcut triggered: Upload files");
-                                if let Some(window) =
-                                    shortcut_app_handle.get_webview_window("main")
+                                if let Some(window) = shortcut_app_handle.get_webview_window("main")
                                 {
                                     if let Err(e) = window.emit("global-shortcut-upload", ()) {
-                                        log::error!(
-                                            "Failed to emit global shortcut event: {e}"
-                                        );
+                                        log::error!("Failed to emit global shortcut event: {e}");
                                     } else {
                                         log::info!("Global shortcut event emitted successfully");
                                     }
@@ -158,10 +156,8 @@ fn main() {
                 None::<&str>,
             )?;
             let sep1 = PredefinedMenuItem::separator(app)?;
-            let show =
-                MenuItem::with_id(app, "show", "🖼️ Show Window", true, None::<&str>)?;
-            let settings =
-                MenuItem::with_id(app, "settings", "⚙️ Settings", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "🖼️ Show Window", true, None::<&str>)?;
+            let settings = MenuItem::with_id(app, "settings", "⚙️ Settings", true, None::<&str>)?;
             let metadata_editor = MenuItem::with_id(
                 app,
                 "metadata_editor",
@@ -204,125 +200,105 @@ fn main() {
                 .tooltip("VRChat Photo Uploader")
                 .icon(app.default_window_icon().unwrap().clone())
                 .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| {
-                    match event.id.as_ref() {
-                        "upload_files" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                if let Err(e) = window.emit("upload-files-request", ()) {
-                                    log::error!("Failed to emit file upload event: {e}");
-                                }
-                                if let Err(e) = window.show() {
-                                    log::error!("Failed to show window: {e}");
-                                }
-                                if let Err(e) = window.set_focus() {
-                                    log::error!("Failed to focus window: {e}");
-                                }
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "upload_files" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            if let Err(e) = window.emit("upload-files-request", ()) {
+                                log::error!("Failed to emit file upload event: {e}");
+                            }
+                            if let Err(e) = window.show() {
+                                log::error!("Failed to show window: {e}");
+                            }
+                            if let Err(e) = window.set_focus() {
+                                log::error!("Failed to focus window: {e}");
                             }
                         }
-                        "open_vrchat_folder" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                if let Err(e) = window.emit("open-vrchat-folder-request", ()) {
-                                    log::error!(
-                                        "Failed to emit open VRChat folder event: {e}"
-                                    );
-                                }
-                            }
-                        }
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                if let Err(e) = window.show() {
-                                    log::error!("Failed to show window: {e}");
-                                }
-                                if let Err(e) = window.set_focus() {
-                                    log::error!("Failed to focus window: {e}");
-                                }
-                            }
-                        }
-                        "settings" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                if let Err(e) = window.emit("show-settings", ()) {
-                                    log::error!("Failed to emit settings event: {e}");
-                                }
-                                if let Err(e) = window.show() {
-                                    log::error!("Failed to show window: {e}");
-                                }
-                                if let Err(e) = window.set_focus() {
-                                    log::error!("Failed to focus window: {e}");
-                                }
-                            }
-                        }
-                        "about" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                if let Err(e) = window.emit("show-about", ()) {
-                                    log::error!("Failed to emit about event: {e}");
-                                }
-                                if let Err(e) = window.show() {
-                                    log::error!("Failed to show window: {e}");
-                                }
-                                if let Err(e) = window.set_focus() {
-                                    log::error!("Failed to focus window: {e}");
-                                }
-                            }
-                        }
-                        "metadata_editor" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                if let Err(e) = window.emit("show-metadata-editor", ()) {
-                                    log::error!("Failed to emit metadata editor event: {e}");
-                                }
-                                if let Err(e) = window.show() {
-                                    log::error!("Failed to show window: {e}");
-                                }
-                                if let Err(e) = window.set_focus() {
-                                    log::error!("Failed to focus window: {e}");
-                                }
-                            }
-                        }
-                        "check_updates" => {
-                            log::info!("Check for updates requested from tray");
-                            let app_handle = app.clone();
-                            tauri::async_runtime::spawn(async move {
-                                if let Err(e) = commands::check_for_updates(app_handle).await {
-                                    log::error!("Failed to check for updates: {e}");
-                                }
-                            });
-                        }
-                        "quit" => {
-                            log::info!("Application quit requested from tray");
-                            single_instance::cleanup_lock_file();
-                            app.exit(0);
-                        }
-                        _ => {}
                     }
+                    "open_vrchat_folder" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            if let Err(e) = window.emit("open-vrchat-folder-request", ()) {
+                                log::error!("Failed to emit open VRChat folder event: {e}");
+                            }
+                        }
+                    }
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            if let Err(e) = window.show() {
+                                log::error!("Failed to show window: {e}");
+                            }
+                            if let Err(e) = window.set_focus() {
+                                log::error!("Failed to focus window: {e}");
+                            }
+                        }
+                    }
+                    "settings" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            if let Err(e) = window.emit("show-settings", ()) {
+                                log::error!("Failed to emit settings event: {e}");
+                            }
+                            if let Err(e) = window.show() {
+                                log::error!("Failed to show window: {e}");
+                            }
+                            if let Err(e) = window.set_focus() {
+                                log::error!("Failed to focus window: {e}");
+                            }
+                        }
+                    }
+                    "about" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            if let Err(e) = window.emit("show-about", ()) {
+                                log::error!("Failed to emit about event: {e}");
+                            }
+                            if let Err(e) = window.show() {
+                                log::error!("Failed to show window: {e}");
+                            }
+                            if let Err(e) = window.set_focus() {
+                                log::error!("Failed to focus window: {e}");
+                            }
+                        }
+                    }
+                    "metadata_editor" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            if let Err(e) = window.emit("show-metadata-editor", ()) {
+                                log::error!("Failed to emit metadata editor event: {e}");
+                            }
+                            if let Err(e) = window.show() {
+                                log::error!("Failed to show window: {e}");
+                            }
+                            if let Err(e) = window.set_focus() {
+                                log::error!("Failed to focus window: {e}");
+                            }
+                        }
+                    }
+                    "check_updates" => {
+                        log::info!("Check for updates requested from tray");
+                        let app_handle = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = commands::check_for_updates(app_handle).await {
+                                log::error!("Failed to check for updates: {e}");
+                            }
+                        });
+                    }
+                    "quit" => {
+                        log::info!("Application quit requested from tray");
+                        single_instance::cleanup_lock_file();
+                        app.exit(0);
+                    }
+                    _ => {}
                 })
-                .on_tray_icon_event(|tray, event| {
-                    match event {
-                        TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            ..
-                        } => {
-                            let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window("main") {
-                                if window.is_visible().unwrap_or(false) {
-                                    if let Err(e) = window.hide() {
-                                        log::error!("Failed to hide window: {e}");
-                                    }
-                                } else {
-                                    if let Err(e) = window.show() {
-                                        log::error!("Failed to show window: {e}");
-                                    }
-                                    if let Err(e) = window.set_focus() {
-                                        log::error!("Failed to focus window: {e}");
-                                    }
+                .on_tray_icon_event(|tray, event| match event {
+                    TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } => {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            if window.is_visible().unwrap_or(false) {
+                                if let Err(e) = window.hide() {
+                                    log::error!("Failed to hide window: {e}");
                                 }
-                            }
-                        }
-                        TrayIconEvent::DoubleClick {
-                            button: MouseButton::Left,
-                            ..
-                        } => {
-                            let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window("main") {
+                            } else {
                                 if let Err(e) = window.show() {
                                     log::error!("Failed to show window: {e}");
                                 }
@@ -331,8 +307,22 @@ fn main() {
                                 }
                             }
                         }
-                        _ => {}
                     }
+                    TrayIconEvent::DoubleClick {
+                        button: MouseButton::Left,
+                        ..
+                    } => {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            if let Err(e) = window.show() {
+                                log::error!("Failed to show window: {e}");
+                            }
+                            if let Err(e) = window.set_focus() {
+                                log::error!("Failed to focus window: {e}");
+                            }
+                        }
+                    }
+                    _ => {}
                 })
                 .build(app)?;
 
@@ -430,7 +420,9 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| if let tauri::RunEvent::ExitRequested { .. } = event {
-            single_instance::cleanup_lock_file();
+        .run(|_app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                single_instance::cleanup_lock_file();
+            }
         });
 }

@@ -172,9 +172,7 @@ where
                 f(session_progress);
                 true
             } else {
-                log::warn!(
-                    "Session {session_id} not found for {operation} operation"
-                );
+                log::warn!("Session {session_id} not found for {operation} operation");
                 false
             }
         }
@@ -201,9 +199,7 @@ where
             if let Some(session_progress) = progress.get(session_id) {
                 Some(f(session_progress))
             } else {
-                log::warn!(
-                    "Session {session_id} not found for {operation} operation"
-                );
+                log::warn!("Session {session_id} not found for {operation} operation");
                 None
             }
         }
@@ -220,15 +216,11 @@ where
 pub fn safe_emit_event(app_handle: &tauri::AppHandle, event_name: &str, payload: &str) -> bool {
     match app_handle.emit(event_name, payload) {
         Ok(_) => {
-            log::debug!(
-                "Successfully emitted event '{event_name}' with payload: {payload}"
-            );
+            log::debug!("Successfully emitted event '{event_name}' with payload: {payload}");
             true
         }
         Err(e) => {
-            log::warn!(
-                "Failed to emit event '{event_name}' (non-critical): {e}"
-            );
+            log::warn!("Failed to emit event '{event_name}' (non-critical): {e}");
             false
         }
     }
@@ -240,13 +232,17 @@ mod tests {
 
     #[test]
     fn test_is_retryable_upload_failed() {
-        let err = AppError::UploadFailed { reason: "timeout".to_string() };
+        let err = AppError::UploadFailed {
+            reason: "timeout".to_string(),
+        };
         assert!(err.is_retryable());
     }
 
     #[test]
     fn test_is_retryable_rate_limit() {
-        let err = AppError::RateLimit { retry_after_ms: 5000 };
+        let err = AppError::RateLimit {
+            retry_after_ms: 5000,
+        };
         assert!(err.is_retryable());
     }
 
@@ -258,7 +254,9 @@ mod tests {
 
     #[test]
     fn test_is_retryable_forum_channel() {
-        let err = AppError::ForumChannelError { message: "wrong type".to_string() };
+        let err = AppError::ForumChannelError {
+            message: "wrong type".to_string(),
+        };
         assert!(err.is_retryable());
     }
 
@@ -301,7 +299,9 @@ mod tests {
 
     #[test]
     fn test_not_permanent_retryable_errors() {
-        let err = AppError::UploadFailed { reason: "x".to_string() };
+        let err = AppError::UploadFailed {
+            reason: "x".to_string(),
+        };
         assert!(!err.is_permanent());
     }
 
@@ -349,9 +349,14 @@ mod tests {
 
     #[test]
     fn test_display_contains_expected_text() {
-        let err = AppError::UploadFailed { reason: "network timeout".to_string() };
+        let err = AppError::UploadFailed {
+            reason: "network timeout".to_string(),
+        };
         let display = format!("{err}");
-        assert!(display.contains("network timeout"), "Display should contain reason: {display}");
+        assert!(
+            display.contains("network timeout"),
+            "Display should contain reason: {display}"
+        );
     }
 
     #[test]

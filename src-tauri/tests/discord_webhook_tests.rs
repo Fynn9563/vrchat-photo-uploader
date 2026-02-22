@@ -75,11 +75,7 @@ async fn test_send_text_message() {
 
     let client = DiscordClient::new();
     let result = client
-        .send_text_message(
-            &webhook_url,
-            "Integration test: text-only message",
-            None,
-        )
+        .send_text_message(&webhook_url, "Integration test: text-only message", None)
         .await;
     assert!(
         result.is_ok(),
@@ -106,7 +102,10 @@ async fn test_send_single_image() {
     let temp_file = create_temp_png(&png_data, "single_image_test.png");
 
     let mut payload = UploadPayload::new();
-    payload.add_text_field("content".to_string(), "[Test 2] Single image upload (PNG 200x200)".to_string());
+    payload.add_text_field(
+        "content".to_string(),
+        "[Test 2] Single image upload (PNG 200x200)".to_string(),
+    );
     payload
         .add_file(&temp_file.path_str(), "file0".to_string())
         .await
@@ -138,12 +137,17 @@ async fn test_send_multiple_images() {
     };
 
     let png_data = create_visible_test_png();
-    let temp_files = [create_temp_png(&png_data, "multi_image_test_0.png"),
+    let temp_files = [
+        create_temp_png(&png_data, "multi_image_test_0.png"),
         create_temp_png(&png_data, "multi_image_test_1.png"),
-        create_temp_png(&png_data, "multi_image_test_2.png")];
+        create_temp_png(&png_data, "multi_image_test_2.png"),
+    ];
 
     let mut payload = UploadPayload::new();
-    payload.add_text_field("content".to_string(), "[Test 3] Multiple images upload (3x PNG 200x200)".to_string());
+    payload.add_text_field(
+        "content".to_string(),
+        "[Test 3] Multiple images upload (3x PNG 200x200)".to_string(),
+    );
     for (i, temp_file) in temp_files.iter().enumerate() {
         payload
             .add_file(&temp_file.path_str(), format!("file{i}"))
@@ -186,7 +190,10 @@ async fn test_send_image_with_metadata_message() {
     let png_data = create_png_with_metadata(&metadata_json);
     let temp_file = create_temp_png(&png_data, "metadata_image_test.png");
 
-    let worlds = vec![make_world("Integration Test World", "wrld_integration_test")];
+    let worlds = vec![make_world(
+        "Integration Test World",
+        "wrld_integration_test",
+    )];
     let players = vec![make_player("Alice"), make_player("Bob")];
 
     let (text_fields, _overflow) = create_discord_payload(
@@ -236,7 +243,10 @@ async fn test_send_message_with_player_list() {
         }
     };
 
-    let worlds = vec![make_world("Player List Test World", "wrld_player_list_test")];
+    let worlds = vec![make_world(
+        "Player List Test World",
+        "wrld_player_list_test",
+    )];
     let players: Vec<PlayerInfo> = (0..30)
         .map(|i| make_player(&format!("TestPlayer_{i:02}")))
         .collect();
@@ -259,9 +269,7 @@ async fn test_send_message_with_player_list() {
     let content = text_fields
         .get("content")
         .expect("Payload should contain 'content' field");
-    let result = client
-        .send_text_message(&webhook_url, content, None)
-        .await;
+    let result = client.send_text_message(&webhook_url, content, None).await;
     assert!(
         result.is_ok(),
         "Failed to send main player list message: {:?}",
@@ -358,7 +366,10 @@ async fn test_forum_upload_image_to_thread() {
     let temp_file = create_temp_png(&png_data, "forum_image_test.png");
 
     let mut payload = UploadPayload::new();
-    payload.add_text_field("content".to_string(), "[Test 7] Forum thread image upload".to_string());
+    payload.add_text_field(
+        "content".to_string(),
+        "[Test 7] Forum thread image upload".to_string(),
+    );
     payload
         .add_file(&temp_file.path_str(), "file0".to_string())
         .await
@@ -401,8 +412,8 @@ async fn test_forum_full_workflow() {
         .await
         .expect("Failed to create forum thread for full workflow");
 
-    let thread_id = extract_thread_id(&thread_response)
-        .expect("Failed to extract thread_id for full workflow");
+    let thread_id =
+        extract_thread_id(&thread_response).expect("Failed to extract thread_id for full workflow");
 
     // Step 2: Upload first image
     let png_data = create_visible_test_png();
@@ -410,7 +421,10 @@ async fn test_forum_full_workflow() {
     let temp_file_2 = create_temp_png(&png_data, "forum_workflow_2.png");
 
     let mut payload1 = UploadPayload::new();
-    payload1.add_text_field("content".to_string(), "[Test 8] Forum workflow - image 1/2".to_string());
+    payload1.add_text_field(
+        "content".to_string(),
+        "[Test 8] Forum workflow - image 1/2".to_string(),
+    );
     payload1
         .add_file(&temp_file_1.path_str(), "file0".to_string())
         .await
@@ -427,7 +441,10 @@ async fn test_forum_full_workflow() {
 
     // Step 3: Upload second image
     let mut payload2 = UploadPayload::new();
-    payload2.add_text_field("content".to_string(), "[Test 8] Forum workflow - image 2/2".to_string());
+    payload2.add_text_field(
+        "content".to_string(),
+        "[Test 8] Forum workflow - image 2/2".to_string(),
+    );
     payload2
         .add_file(&temp_file_2.path_str(), "file0".to_string())
         .await
@@ -539,7 +556,9 @@ async fn compress_and_upload(webhook_url: &str, format: &str, test_name: &str) {
     let mut payload = UploadPayload::new();
     payload.add_text_field(
         "content".to_string(),
-        format!("[Compression Test] Format: **{format}** | Quality: 80 | Size: {compressed_size} bytes"),
+        format!(
+            "[Compression Test] Format: **{format}** | Quality: 80 | Size: {compressed_size} bytes"
+        ),
     );
     payload
         .add_file(&compressed_path, "file0".to_string())

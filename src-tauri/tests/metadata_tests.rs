@@ -200,9 +200,7 @@ fn test_timestamp_from_filename_without_milliseconds() {
 fn test_timestamp_from_filename_no_pattern() {
     // A filename that does not match VRChat's naming convention and does not
     // exist on disk (so file creation time fallback also fails).
-    let ts = image_processor::get_timestamp_from_filename(
-        "/nonexistent/random_photo.png",
-    );
+    let ts = image_processor::get_timestamp_from_filename("/nonexistent/random_photo.png");
     assert!(
         ts.is_none(),
         "Should return None when filename has no date pattern and file does not exist"
@@ -212,9 +210,7 @@ fn test_timestamp_from_filename_no_pattern() {
 #[test]
 fn test_timestamp_from_filename_only_date_no_time() {
     // Only a date component, no time component separated by underscore.
-    let ts = image_processor::get_timestamp_from_filename(
-        "/photos/2024-01-15.png",
-    );
+    let ts = image_processor::get_timestamp_from_filename("/photos/2024-01-15.png");
     // The regex expects YYYY-MM-DD_HH-MM-SS, so a bare date should not match.
     assert!(
         ts.is_none(),
@@ -571,10 +567,7 @@ async fn test_embed_metadata_overwrites_existing() {
         .await
         .expect("should succeed")
         .expect("should find original metadata");
-    assert_eq!(
-        original_extracted.world.unwrap().name,
-        "Original World"
-    );
+    assert_eq!(original_extracted.world.unwrap().name, "Original World");
 
     // Now embed new metadata
     let new_metadata = ImageMetadata {

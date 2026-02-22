@@ -120,9 +120,7 @@ pub async fn group_images_by_metadata(
         } else if merge_no_metadata && last_valid_group_key.is_some() {
             // If merging is enabled and we have a previous group, use it!
             let key = last_valid_group_key.as_ref().unwrap().clone();
-            log::info!(
-                "Merging no-metadata file {file_path} into previous group: {key}"
-            );
+            log::info!("Merging no-metadata file {file_path} into previous group: {key}");
             key
         } else if no_time_limit {
             "unknown_all".to_string()
@@ -276,6 +274,7 @@ fn create_metadata_key(
 }
 
 /// Creates Discord payload. Returns (main_payload, overflow_messages)
+#[allow(clippy::too_many_arguments)]
 pub fn create_discord_payload(
     all_worlds: &[WorldInfo],
     all_players: &[PlayerInfo],
@@ -634,7 +633,15 @@ mod tests {
         let worlds = vec![make_world("Test World", "wrld_123")];
         let players = vec![];
         let (payload, overflow) = create_discord_payload(
-            &worlds, &players, Some(1705312200), true, 0, false, None, false, 3,
+            &worlds,
+            &players,
+            Some(1705312200),
+            true,
+            0,
+            false,
+            None,
+            false,
+            3,
         );
         let content = payload.get("content").unwrap();
         assert!(content.contains("Photos taken at"));
@@ -645,9 +652,8 @@ mod tests {
 
     #[test]
     fn test_payload_first_message_no_world() {
-        let (payload, _) = create_discord_payload(
-            &[], &[], Some(1705312200), true, 0, false, None, false, 5,
-        );
+        let (payload, _) =
+            create_discord_payload(&[], &[], Some(1705312200), true, 0, false, None, false, 5);
         let content = payload.get("content").unwrap();
         assert!(content.contains("Photos"));
         assert!(content.contains("<t:1705312200:f>"));
@@ -656,19 +662,17 @@ mod tests {
     #[test]
     fn test_payload_continuation_chunk_empty() {
         let worlds = vec![make_world("W", "wrld_1")];
-        let (payload, _) = create_discord_payload(
-            &worlds, &[], None, false, 1, false, None, false, 2,
-        );
+        let (payload, _) =
+            create_discord_payload(&worlds, &[], None, false, 1, false, None, false, 2);
         // Continuation chunks should have no content
-        assert!(payload.get("content").is_none());
+        assert!(!payload.contains_key("content"));
     }
 
     #[test]
     fn test_payload_forum_adds_thread_name() {
         let worlds = vec![make_world("My World", "wrld_456")];
-        let (payload, _) = create_discord_payload(
-            &worlds, &[], None, true, 0, true, None, false, 2,
-        );
+        let (payload, _) =
+            create_discord_payload(&worlds, &[], None, true, 0, true, None, false, 2);
         assert!(payload.contains_key("thread_name"));
         let thread_name = payload.get("thread_name").unwrap();
         assert!(thread_name.contains("My World"));
@@ -676,9 +680,7 @@ mod tests {
 
     #[test]
     fn test_payload_singular_photo() {
-        let (payload, _) = create_discord_payload(
-            &[], &[], None, true, 0, false, None, false, 1,
-        );
+        let (payload, _) = create_discord_payload(&[], &[], None, true, 0, false, None, false, 1);
         let content = payload.get("content").unwrap();
         assert!(content.contains("Photo"));
         assert!(!content.contains("Photos"));
@@ -686,9 +688,7 @@ mod tests {
 
     #[test]
     fn test_payload_plural_photos() {
-        let (payload, _) = create_discord_payload(
-            &[], &[], None, true, 0, false, None, false, 2,
-        );
+        let (payload, _) = create_discord_payload(&[], &[], None, true, 0, false, None, false, 2);
         let content = payload.get("content").unwrap();
         assert!(content.contains("Photos"));
     }
@@ -697,9 +697,8 @@ mod tests {
     fn test_payload_with_players() {
         let worlds = vec![make_world("W", "wrld_1")];
         let players = vec![make_player("Alice"), make_player("Bob")];
-        let (payload, overflow) = create_discord_payload(
-            &worlds, &players, None, true, 0, false, None, true, 2,
-        );
+        let (payload, overflow) =
+            create_discord_payload(&worlds, &players, None, true, 0, false, None, true, 2);
         let content = payload.get("content").unwrap();
         assert!(content.contains("Alice"));
         assert!(content.contains("Bob"));
@@ -710,9 +709,8 @@ mod tests {
     fn test_payload_without_player_names_flag() {
         let worlds = vec![make_world("W", "wrld_1")];
         let players = vec![make_player("Alice")];
-        let (payload, _) = create_discord_payload(
-            &worlds, &players, None, true, 0, false, None, false, 2,
-        );
+        let (payload, _) =
+            create_discord_payload(&worlds, &players, None, true, 0, false, None, false, 2);
         let content = payload.get("content").unwrap();
         assert!(!content.contains("Alice"));
     }
@@ -783,7 +781,11 @@ mod tests {
             make_world("Another Long World Name To Push Over Limit", "wrld_2"),
         ];
         let title = create_thread_title(&worlds, 5);
-        assert!(title.len() <= 100, "Title should be at most 100 chars: len={}", title.len());
+        assert!(
+            title.len() <= 100,
+            "Title should be at most 100 chars: len={}",
+            title.len()
+        );
     }
 
     #[test]
@@ -864,7 +866,11 @@ mod tests {
             .map(|i| make_player(&format!("LongPlayerName_{i:04}")))
             .collect();
         let msgs = create_overflow_player_messages(&players, true);
-        assert!(msgs.len() > 1, "Should need multiple messages for {} players", players.len());
+        assert!(
+            msgs.len() > 1,
+            "Should need multiple messages for {} players",
+            players.len()
+        );
         for msg in &msgs {
             assert!(msg.len() <= 1901, "Message too long: {}", msg.len());
         }
@@ -935,7 +941,11 @@ mod tests {
 
     #[test]
     fn test_split_players_multiple() {
-        let players = vec![make_player("Alice"), make_player("Bob"), make_player("Charlie")];
+        let players = vec![
+            make_player("Alice"),
+            make_player("Bob"),
+            make_player("Charlie"),
+        ];
         let msgs = create_split_player_messages(&players);
         assert_eq!(msgs.len(), 1);
         assert!(msgs[0].contains("Alice"));

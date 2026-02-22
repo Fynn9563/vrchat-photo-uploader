@@ -25,9 +25,7 @@ pub fn check_single_instance() -> Result<(), SingleInstanceError> {
                         || process_name.contains("photo")
                         || process_name.contains("uploader")
                     {
-                        log::info!(
-                            "Found existing instance (PID: {pid}), signaling it to show"
-                        );
+                        log::info!("Found existing instance (PID: {pid}), signaling it to show");
                         signal_existing_instance();
                         return Err(SingleInstanceError); // Exit this instance
                     }

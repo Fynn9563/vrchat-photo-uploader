@@ -179,9 +179,7 @@ pub fn update_progress_group_failure(
                 is_retryable,
             });
 
-            log::warn!(
-                "Progress: Group failure for {file_path} in group {group_id} - {error}"
-            );
+            log::warn!("Progress: Group failure for {file_path} in group {group_id} - {error}");
         },
     );
 }
