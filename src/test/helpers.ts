@@ -33,6 +33,7 @@ export const createMockWebhook = (overrides: Partial<any> = {}): any => {
     name: 'Test Webhook',
     url: 'https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz123456',
     is_forum: false,
+    pinned: false,
     ...overrides
   };
 };
@@ -47,6 +48,9 @@ export const createMockUploadProgress = (overrides: Partial<any> = {}): any => {
     successful_uploads: ['uploaded.png'],
     session_status: 'uploading',
     estimated_time_remaining: 120,
+    current_webhook_index: 0,
+    total_webhooks: 1,
+    current_webhook_name: 'Test Webhook',
     ...overrides
   };
 };

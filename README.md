@@ -28,11 +28,14 @@ A powerful desktop application for uploading VRChat photos to Discord with intel
 
 ### Discord Integration
 - **Multiple Webhooks** - Save and manage multiple Discord webhooks
-- **Forum Channel Support** - Create threaded posts in Discord forum channels
+- **Multi-Webhook Upload** - Upload the same photos to multiple webhooks in a single session
+- **Webhook Pinning** - Pin important webhooks to the top of all dropdown lists
+- **Forum Channel Support** - Per-webhook forum channel setting for threaded posts
 - **Single Thread Mode** - Post all groups to a single forum thread
 - **Smart Message Formatting** - Automatically handles Discord's 2000 character limit
 - **Batched Uploads** - Configurable images per message (1-10)
 - **Player Name Lists** - Optional player names in post content
+- **Discord @Mentions** - Map VRChat players to Discord user IDs for automatic tagging
 - **User Webhook Overrides** - Redirect specific players' photos to different webhooks
 
 ### Background Auto-Upload
@@ -60,6 +63,7 @@ A powerful desktop application for uploading VRChat photos to Discord with intel
 
 ### Tools
 - **Metadata Editor** - View, edit, and embed metadata into PNG files
+- **Discord Player Tagging** - Map VRChat players to Discord @mentions
 - **VRChat Folder Quick Access** - One-click access to your photos folder
 - **Background Queue Monitor** - View and control background uploads
 
@@ -67,12 +71,12 @@ A powerful desktop application for uploading VRChat photos to Discord with intel
 
 ### Windows
 Download from the [Releases page](https://github.com/fynn9563/vrchat-photo-uploader/releases):
-- **Installer**: `VRChat-Photo-Uploader-v{version}-x64.msi` - Recommended for most users
-- **Portable**: `VRChat-Photo-Uploader-v{version}-x64.exe` - No installation required
+- **Installer**: `VRChat-Photo-Uploader_{version}_x64-setup.exe` - Recommended for most users (NSIS)
 
 ### Linux
-- **AppImage**: `VRChat-Photo-Uploader-v{version}-x86_64.AppImage` - Portable, works on most distros
-- **Debian/Ubuntu**: `vrchat-photo-uploader_{version}_amd64.deb` - Native package
+- **AppImage**: `VRChat-Photo-Uploader_{version}_amd64.AppImage` - Portable, works on most distros
+- **Debian/Ubuntu**: `VRChat-Photo-Uploader_{version}_amd64.deb` - Native package
+- **RPM**: `VRChat-Photo-Uploader-{version}-1.x86_64.rpm` - Fedora/openSUSE
 
 ## Quick Start
 
@@ -82,9 +86,10 @@ Download from the [Releases page](https://github.com/fynn9563/vrchat-photo-uploa
    - In the app: Click **Manage** > paste URL > **Add Webhook**
 
 2. **Configure Settings**
-   - Enable **Forum Channel** if posting to a Discord forum
+   - When adding a webhook, enable **Forum Channel** if it targets a Discord forum
    - Enable **Smart Grouping** for automatic organization
    - Adjust **Images per Message** (default: 10)
+   - Optionally enable **Multi-Webhook Upload** in Settings to upload to multiple webhooks at once
 
 3. **Upload Photos**
    - Drag & drop photos or click to browse
@@ -96,14 +101,21 @@ Download from the [Releases page](https://github.com/fynn9563/vrchat-photo-uploa
 ### Upload Settings
 | Setting | Description |
 |---------|-------------|
-| Forum Channel | Creates threaded posts in forum channels |
 | Images per Message | Maximum attachments per Discord message (1-10) |
 | Smart Grouping | Automatically organizes photos by metadata |
 | Group by World | Groups photos from the same VRChat world |
 | Group by Time | Groups photos within a time window |
 | Include Player Names | Lists players in the post content |
-| Single Thread Mode | Posts all groups to a single forum thread |
+| Single Thread Mode | Posts all groups to a single forum thread (shown for forum webhooks) |
 | Merge No Metadata | Includes photos without metadata in adjacent groups |
+
+### Webhook Settings
+| Setting | Description |
+|---------|-------------|
+| Forum Channel | Per-webhook toggle — creates threaded posts in forum channels |
+| Pin Webhook | Pin a webhook to the top of all dropdown lists |
+| Multi-Webhook Upload | Upload to multiple webhooks in a single session |
+| Discord Player Tagging | Map VRChat players to Discord user IDs for @mentions |
 
 ### Background Auto-Upload Settings
 | Setting | Description |
@@ -112,7 +124,7 @@ Download from the [Releases page](https://github.com/fynn9563/vrchat-photo-uploa
 | VRChat Folder | Path to watch for new photos |
 | Upload Delay | Seconds to wait for additional photos |
 | Batch Size | Maximum images per message |
-| Forum Channel | Use forum posting for background uploads |
+| Target Webhooks | Select one or more webhooks for auto-uploads |
 
 ### Preferences
 | Setting | Description |
@@ -122,7 +134,7 @@ Download from the [Releases page](https://github.com/fynn9563/vrchat-photo-uploa
 | Global Shortcuts | Enable `Ctrl+Shift+U` system-wide shortcut |
 | Image Previews | Enable `Ctrl+Hover` thumbnail previews |
 | Compression Format | WebP, WebP Lossless, AVIF, PNG, or JPEG |
-| Default Forum Mode | Default state of Forum Channel checkbox |
+| Multi-Webhook Upload | Enable selecting multiple webhooks for upload |
 
 ## Keyboard Shortcuts
 

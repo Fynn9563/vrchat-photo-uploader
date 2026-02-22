@@ -18,7 +18,6 @@ pub async fn process_upload_queue(
     file_paths: Vec<String>,
     group_by_metadata: bool,
     max_images_per_message: u8,
-    is_forum_channel: bool,
     include_player_names: bool,
     time_window_minutes: u32,
     group_by_world: bool,
@@ -29,22 +28,25 @@ pub async fn process_upload_queue(
     progress_state: ProgressState,
     session_id: String,
     app_handle: tauri::AppHandle,
+    mark_completed: bool,
 ) {
     let client = DiscordClient::new();
 
     log::info!("Starting upload session {session_id}");
     log::info!("Single Thread Mode: {single_thread_mode}, Merge No Metadata: {merge_no_metadata}");
 
-    // Initial progress update
-    update_progress(
-        &progress_state,
-        &session_id,
-        file_paths.len(),
-        0,
-        None,
-        0.0,
-        "Preparing images...",
-    );
+    // Initial progress update (only for standalone calls — coordinator sets up its own progress)
+    if mark_completed {
+        update_progress(
+            &progress_state,
+            &session_id,
+            file_paths.len(),
+            0,
+            None,
+            0.0,
+            "Preparing images...",
+        );
+    }
 
     // Resolve compression settings (Config Priority: Request Override > Global Config > Default)
     let config = crate::config::load_config().ok();
@@ -97,8 +99,10 @@ pub async fn process_upload_queue(
 
     if valid_files.is_empty() {
         log::warn!("No valid files to upload for session {session_id}");
-        mark_session_completed(&progress_state, &session_id);
-        emit_session_progress(&app_handle, &progress_state, &session_id);
+        if mark_completed {
+            mark_session_completed(&progress_state, &session_id);
+            emit_session_progress(&app_handle, &progress_state, &session_id);
+        }
         return;
     }
 
@@ -184,6 +188,24 @@ pub async fn process_upload_queue(
         })
         .collect();
 
+    // Load Discord user mappings (VRChat player → Discord @mention)
+    let discord_mappings_list = database::get_discord_user_mappings()
+        .await
+        .unwrap_or_default();
+    let discord_user_map: HashMap<String, String> = discord_mappings_list
+        .into_iter()
+        .flat_map(|m| {
+            let mut items = Vec::new();
+            if let Some(uid) = m.vrchat_user_id {
+                items.push((uid.to_lowercase(), m.discord_user_id.clone()));
+            }
+            if let Some(name) = m.vrchat_display_name {
+                items.push((name.to_lowercase(), m.discord_user_id));
+            }
+            items
+        })
+        .collect();
+
     let mut merged_thread_id: Option<String> = None;
 
     // Process each group
@@ -256,7 +278,6 @@ pub async fn process_upload_queue(
             &target_webhook,
             group,
             max_images_per_message,
-            is_forum_channel,
             include_player_names,
             &progress_state,
             &session_id,
@@ -265,6 +286,7 @@ pub async fn process_upload_queue(
             effective_quality,
             effective_format.clone(),
             target_thread_id,
+            &discord_user_map,
         )
         .await;
 
@@ -317,26 +339,28 @@ pub async fn process_upload_queue(
         return;
     }
 
-    // Mark session as completed
-    mark_session_completed(&progress_state, &session_id);
+    if mark_completed {
+        // Mark session as completed
+        mark_session_completed(&progress_state, &session_id);
 
-    // Update database session status (non-blocking)
-    let session_id_for_db = session_id.clone();
-    tokio::spawn(async move {
-        if let Ok(Some((_total, completed, successful, failed))) =
-            database::get_upload_session_stats(&session_id_for_db).await
-        {
-            let _ = database::update_upload_session_progress(
-                &session_id_for_db,
-                completed,
-                successful,
-                failed,
-            )
-            .await;
-        }
-    });
+        // Update database session status (non-blocking)
+        let session_id_for_db = session_id.clone();
+        tokio::spawn(async move {
+            if let Ok(Some((_total, completed, successful, failed))) =
+                database::get_upload_session_stats(&session_id_for_db).await
+            {
+                let _ = database::update_upload_session_progress(
+                    &session_id_for_db,
+                    completed,
+                    successful,
+                    failed,
+                )
+                .await;
+            }
+        });
 
-    emit_session_progress(&app_handle, &progress_state, &session_id);
+        emit_session_progress(&app_handle, &progress_state, &session_id);
+    }
 }
 
 /// Process image group with error handling
@@ -346,7 +370,6 @@ async fn process_image_group_with_failure_handling(
     webhook: &Webhook,
     group: ImageGroup,
     max_images_per_message: u8,
-    is_forum_channel: bool,
     include_player_names: bool,
     progress_state: &ProgressState,
     session_id: &str,
@@ -355,7 +378,9 @@ async fn process_image_group_with_failure_handling(
     quality: u8,
     format: String,
     override_thread_id: Option<String>,
+    discord_user_map: &HashMap<String, String>,
 ) -> (bool, Option<String>) {
+    let is_forum_channel = webhook.is_forum;
     log::info!(
         "🚀 Starting group upload (ID: {}, {} images)",
         group.group_id,
@@ -434,6 +459,7 @@ async fn process_image_group_with_failure_handling(
             thread_id.as_deref(),
             include_player_names,
             group.images.len(),
+            discord_user_map,
         );
 
         // If this is the first message and we have overflow player messages,
@@ -543,6 +569,7 @@ async fn process_image_group_with_failure_handling(
                                             let player_messages =
                                                 super::image_groups::create_split_player_messages(
                                                     &group.all_players,
+                                                    discord_user_map,
                                                 );
                                             for (i, player_msg) in
                                                 player_messages.iter().enumerate()
@@ -622,7 +649,7 @@ async fn process_image_group_with_failure_handling(
                                                     if include_player_names
                                                         && !group.all_players.is_empty()
                                                     {
-                                                        let player_messages = super::image_groups::create_split_player_messages(&group.all_players);
+                                                        let player_messages = super::image_groups::create_split_player_messages(&group.all_players, discord_user_map);
                                                         for (i, player_msg) in
                                                             player_messages.iter().enumerate()
                                                         {
@@ -751,6 +778,7 @@ async fn process_image_group_with_failure_handling(
                                         let player_messages =
                                             super::image_groups::create_split_player_messages(
                                                 &group.all_players,
+                                                discord_user_map,
                                             );
                                         for (i, player_msg) in player_messages.iter().enumerate() {
                                             if let Err(e3) = client
@@ -822,6 +850,7 @@ async fn process_image_group_with_failure_handling(
                                             let player_messages =
                                                 super::image_groups::create_split_player_messages(
                                                     &group.all_players,
+                                                    discord_user_map,
                                                 );
                                             for (i, player_msg) in
                                                 player_messages.iter().enumerate()

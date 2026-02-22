@@ -42,7 +42,7 @@
   },
   "productName": "VRChat Photo Uploader",
   "mainBinaryName": "VRChat-Photo-Uploader",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "identifier": "com.vrchat.photo.uploader",
   "plugins": {
     "updater": {

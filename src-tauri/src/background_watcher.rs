@@ -413,13 +413,14 @@ async fn process_auto_upload_batch(
         });
     }
 
-    let webhook_id = match config.auto_upload_webhook_id {
-        Some(id) => id,
-        None => {
-            return Err(AppError::UploadFailed {
-                reason: "No auto-upload webhook configured".to_string(),
-            })
-        }
+    let webhook_ids = if !config.auto_upload_webhook_ids.is_empty() {
+        config.auto_upload_webhook_ids.clone()
+    } else if let Some(id) = config.auto_upload_webhook_id {
+        vec![id]
+    } else {
+        return Err(AppError::UploadFailed {
+            reason: "No auto-upload webhook configured".to_string(),
+        });
     };
 
     // --- Resilience Filtering ---
@@ -466,16 +467,11 @@ async fn process_auto_upload_batch(
     }
     // ----------------------------
 
-    // Get the webhook to check its forum status
-    let webhook = database::get_webhook_by_id(webhook_id).await?;
-    let is_forum = webhook.is_forum;
-
     let options = uploader::SessionOptions {
-        webhook_id,
+        webhook_ids: webhook_ids.clone(),
         file_paths: valid_paths,
         group_by_metadata: config.auto_upload_group_by_metadata,
         max_images_per_message: config.auto_upload_batch_size,
-        is_forum_channel: is_forum || config.auto_upload_forum_channel,
         include_player_names: config.auto_upload_include_players,
         grouping_time_window: config.auto_upload_time_window,
         group_by_world: config.auto_upload_group_by_world,
@@ -495,9 +491,9 @@ async fn process_auto_upload_batch(
     }
 
     log::info!(
-        "🚀 Auto-upload session starting for '{}' (Forum: {})",
-        webhook.name,
-        is_forum
+        "🚀 Auto-upload session starting for webhook_ids={:?} ({} files)",
+        webhook_ids,
+        options.file_paths.len()
     );
 
     uploader::SessionManager::start_session(app_handle, options).await

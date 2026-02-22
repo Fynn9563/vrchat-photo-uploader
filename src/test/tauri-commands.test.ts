@@ -71,7 +71,6 @@ describe('Tauri Command Invocations', () => {
         filePaths: ['/photos/img1.png', '/photos/img2.png'],
         groupByMetadata: true,
         maxImagesPerMessage: 10,
-        isForumChannel: false,
         includePlayerNames: true,
         groupingTimeWindow: 60,
         groupByWorld: true,
@@ -241,6 +240,72 @@ describe('Tauri Command Invocations', () => {
       await invoke('delete_user_webhook_override', { id: 1 });
 
       expect(mockTauri.invoke).toHaveBeenCalledWith('delete_user_webhook_override', { id: 1 });
+    });
+  });
+
+  describe('Discord User Mapping Commands', () => {
+    it('should invoke get_discord_user_mappings', async () => {
+      mockTauri.invoke.mockResolvedValueOnce([
+        { id: 1, vrchat_display_name: 'Alice', vrchat_user_id: 'usr_alice', discord_user_id: '123456789' },
+      ]);
+
+      const result = await invoke('get_discord_user_mappings') as Array<{ discord_user_id: string }>;
+
+      expect(mockTauri.invoke).toHaveBeenCalledWith('get_discord_user_mappings');
+      expect(result).toHaveLength(1);
+      expect(result[0].discord_user_id).toBe('123456789');
+    });
+
+    it('should invoke add_discord_user_mapping with display name', async () => {
+      mockTauri.invoke.mockResolvedValueOnce(1);
+
+      await invoke('add_discord_user_mapping', {
+        vrchatDisplayName: 'Alice',
+        vrchatUserId: null,
+        discordUserId: '123456789',
+      });
+
+      expect(mockTauri.invoke).toHaveBeenCalledWith('add_discord_user_mapping', expect.objectContaining({
+        discordUserId: '123456789',
+      }));
+    });
+
+    it('should invoke add_discord_user_mapping with user ID', async () => {
+      mockTauri.invoke.mockResolvedValueOnce(2);
+
+      await invoke('add_discord_user_mapping', {
+        vrchatDisplayName: null,
+        vrchatUserId: 'usr_alice',
+        discordUserId: '987654321',
+      });
+
+      expect(mockTauri.invoke).toHaveBeenCalledWith('add_discord_user_mapping', expect.objectContaining({
+        vrchatUserId: 'usr_alice',
+      }));
+    });
+
+    it('should invoke update_discord_user_mapping', async () => {
+      mockTauri.invoke.mockResolvedValueOnce(undefined);
+
+      await invoke('update_discord_user_mapping', {
+        id: 1,
+        vrchatDisplayName: 'Alice Updated',
+        vrchatUserId: null,
+        discordUserId: '111111111',
+      });
+
+      expect(mockTauri.invoke).toHaveBeenCalledWith('update_discord_user_mapping', expect.objectContaining({
+        id: 1,
+        discordUserId: '111111111',
+      }));
+    });
+
+    it('should invoke delete_discord_user_mapping with id', async () => {
+      mockTauri.invoke.mockResolvedValueOnce(undefined);
+
+      await invoke('delete_discord_user_mapping', { id: 1 });
+
+      expect(mockTauri.invoke).toHaveBeenCalledWith('delete_discord_user_mapping', { id: 1 });
     });
   });
 

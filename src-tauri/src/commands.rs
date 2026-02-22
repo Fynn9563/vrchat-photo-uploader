@@ -12,15 +12,15 @@ pub struct Webhook {
     pub name: String,
     pub url: String,
     pub is_forum: bool,
+    pub pinned: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UploadRequest {
-    pub webhook_id: i64,
+    pub webhook_ids: Vec<i64>,
     pub file_paths: Vec<String>,
     pub group_by_metadata: bool,
     pub max_images_per_message: u8,
-    pub is_forum_channel: bool,
     pub include_player_names: bool,
     #[serde(default = "default_time_window")]
     pub grouping_time_window: u32,
@@ -56,6 +56,9 @@ pub struct UploadProgress {
     pub successful_uploads: Vec<String>,
     pub session_status: String, // "active", "completed", "failed", "cancelled"
     pub estimated_time_remaining: Option<u64>, // seconds
+    pub current_webhook_index: usize,
+    pub total_webhooks: usize,
+    pub current_webhook_name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -95,6 +98,8 @@ pub struct PlayerInfo {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     pub last_webhook_id: Option<i64>,
+    #[serde(default)]
+    pub last_webhook_ids: Vec<i64>,
     pub group_by_metadata: bool,
     pub max_images_per_message: u8,
     pub enable_global_shortcuts: bool,
@@ -103,10 +108,14 @@ pub struct AppConfig {
     pub compression_format: String, // "webp", "lossless_webp", "png", "jpg"
     pub enable_auto_upload: bool,
     pub auto_upload_webhook_id: Option<i64>,
+    #[serde(default)]
+    pub auto_upload_webhook_ids: Vec<i64>,
     pub vrchat_path: Option<String>,
     pub single_thread_mode: bool,
     pub merge_no_metadata: bool,
     pub default_forum_mode: bool,
+    #[serde(default)]
+    pub enable_multi_webhook: bool,
     pub auto_upload_delay_seconds: u32,
     pub auto_upload_batch_size: u8,
     pub auto_upload_forum_channel: bool,
@@ -173,6 +182,9 @@ pub async fn retry_failed_group(
                 successful_uploads: Vec::new(),
                 session_status: "active".to_string(),
                 estimated_time_remaining: None,
+                current_webhook_index: 0,
+                total_webhooks: 1,
+                current_webhook_name: String::new(),
             },
         );
     }
@@ -198,7 +210,6 @@ pub async fn retry_failed_group(
             file_paths,
             true,  // group_by_metadata = true for group retry
             10,    // max_images_per_message = 10 (safe for forum channels)
-            false, // is_forum_channel = false (default, will be set by UI if needed)
             true,  // include_player_names = true (default for retries)
             10,    // grouping_time_window = 10 minutes (default)
             true,  // group_by_world = true (default)
@@ -209,6 +220,7 @@ pub async fn retry_failed_group(
             progress_state_clone,
             new_session_id_clone,
             app_handle_clone,
+            true, // mark completed (single-webhook retry)
         )
         .await;
     });
@@ -267,16 +279,26 @@ pub async fn delete_webhook(id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn toggle_webhook_pin(id: i64) -> Result<bool, String> {
+    if id <= 0 {
+        return Err("Invalid webhook ID".to_string());
+    }
+
+    database::toggle_webhook_pin(id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn upload_images(
     request: UploadRequest,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
     let options = uploader::SessionOptions {
-        webhook_id: request.webhook_id,
+        webhook_ids: request.webhook_ids,
         file_paths: request.file_paths,
         group_by_metadata: request.group_by_metadata,
         max_images_per_message: request.max_images_per_message,
-        is_forum_channel: request.is_forum_channel,
         include_player_names: request.include_player_names,
         grouping_time_window: request.grouping_time_window,
         group_by_world: request.group_by_world,
@@ -844,6 +866,63 @@ pub async fn delete_user_webhook_override(id: i64) -> Result<(), String> {
     }
 
     database::delete_user_webhook_override(id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// Discord User Mapping Commands (VRChat player → Discord @mention)
+
+#[tauri::command]
+pub async fn get_discord_user_mappings() -> Result<Vec<database::DiscordUserMapping>, String> {
+    database::get_discord_user_mappings()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn add_discord_user_mapping(
+    vrchat_display_name: Option<String>,
+    vrchat_user_id: Option<String>,
+    discord_user_id: String,
+) -> Result<i64, String> {
+    if vrchat_display_name.is_none() && vrchat_user_id.is_none() {
+        return Err("Must provide either VRChat Display Name or VRChat User ID".to_string());
+    }
+
+    if discord_user_id.is_empty() || !discord_user_id.chars().all(|c| c.is_ascii_digit()) {
+        return Err(
+            "Discord User ID must be a numeric ID (right-click user → Copy User ID)".to_string(),
+        );
+    }
+
+    database::add_discord_user_mapping(vrchat_display_name, vrchat_user_id, discord_user_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_discord_user_mapping(
+    id: i64,
+    vrchat_display_name: Option<String>,
+    vrchat_user_id: Option<String>,
+    discord_user_id: String,
+) -> Result<(), String> {
+    if id <= 0 {
+        return Err("Invalid mapping ID".to_string());
+    }
+
+    database::update_discord_user_mapping(id, vrchat_display_name, vrchat_user_id, discord_user_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_discord_user_mapping(id: i64) -> Result<(), String> {
+    if id <= 0 {
+        return Err("Invalid mapping ID".to_string());
+    }
+
+    database::delete_discord_user_mapping(id)
         .await
         .map_err(|e| e.to_string())
 }

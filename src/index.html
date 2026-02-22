@@ -25,9 +25,13 @@
     <div class="card">
       <h2 class="card-title">🎯 Webhook Selection</h2>
       <div class="webhook-selector">
-        <select id="webhookSelect" class="form-control">
-          <option value="">Select a webhook...</option>
-        </select>
+        <div class="multi-webhook-dropdown" id="multiWebhookDropdown">
+          <button type="button" class="form-control multi-webhook-trigger" id="webhookDropdownTrigger">
+            <span id="webhookSelectionSummary">Select webhooks...</span>
+            <span class="dropdown-arrow">&#9660;</span>
+          </button>
+          <div class="multi-webhook-panel hidden" id="webhookDropdownPanel"></div>
+        </div>
         <button id="manageWebhooksBtn" class="btn btn-secondary">
           🔧 Manage
         </button>
@@ -41,19 +45,6 @@
       <div class="settings-sections">
         <!-- Discord Settings Row -->
         <div class="settings-row">
-          <div class="setting-item setting-item-toggle">
-            <div class="setting-toggle">
-              <input type="checkbox" id="isForumChannel" class="toggle-input" />
-              <label for="isForumChannel" class="toggle-label">
-                <span class="toggle-switch"></span>
-              </label>
-            </div>
-            <div class="setting-content">
-              <span class="setting-title">Forum Channel</span>
-              <span class="setting-description">Post to Discord forum threads</span>
-            </div>
-          </div>
-
           <div class="setting-item setting-item-select">
             <div class="setting-content">
               <span class="setting-title">Images per Message</span>
@@ -66,7 +57,7 @@
             </select>
           </div>
 
-          <div class="setting-item setting-item-toggle">
+          <div id="singleThreadModeContainer" class="setting-item setting-item-toggle hidden">
             <div class="setting-toggle">
               <input type="checkbox" id="singleThreadMode" class="toggle-input" />
               <label for="singleThreadMode" class="toggle-label">
@@ -75,7 +66,7 @@
             </div>
             <div class="setting-content">
               <span class="setting-title">Single Thread Mode</span>
-              <span class="setting-description">Upload all to one thread</span>
+              <span class="setting-description">Upload all to one forum thread</span>
             </div>
           </div>
         </div>
@@ -266,6 +257,11 @@
           </div>
         </div>
 
+        <div class="checkbox-group">
+          <input type="checkbox" id="webhookIsForum" class="checkbox" />
+          <label for="webhookIsForum" class="form-label">Forum Channel</label>
+          <div class="form-help" style="margin-left: 24px;">Enable if this webhook posts to a Discord forum channel</div>
+        </div>
 
         <div class="modal-actions">
           <button id="addWebhookBtn" class="btn btn-primary">
@@ -313,6 +309,31 @@
           <div id="overridesList" class="overrides-list"></div>
         </div>
       </div>
+
+      <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+
+      <div class="form-group">
+        <label class="form-label">🏷️ Discord Player Tagging</label>
+        <div class="form-help" style="margin-bottom: 10px;">
+          Map VRChat players to Discord users. Mapped players will appear as @mentions instead of bold text in uploads.
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 15px;">
+          <input type="text" id="discordMappingUserInput" class="form-control" placeholder="VRChat Name or ID (usr_...)" />
+          <input type="text" id="discordMappingDiscordId" class="form-control" placeholder="Discord User ID" />
+          <button id="addDiscordMappingBtn" class="btn btn-primary" style="white-space: nowrap;">
+            ➕ Add
+          </button>
+        </div>
+        <div class="form-help" style="margin-bottom: 10px; font-size: 0.75rem;">
+          Right-click a user in Discord → Copy User ID (requires Developer Mode in Discord settings).
+        </div>
+
+        <div class="overrides-container"
+          style="max-height: 150px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px; padding: 5px;">
+          <div id="discordMappingsList" class="overrides-list"></div>
+        </div>
+      </div>
     </div>
   </div>
   </div>
@@ -353,8 +374,8 @@
             </div>
 
             <div class="checkbox-group">
-              <input type="checkbox" id="defaultForumMode" class="checkbox" />
-              <label for="defaultForumMode" class="form-label">Default Forum Channel mode to ON</label>
+              <input type="checkbox" id="enableMultiWebhook" class="checkbox" />
+              <label for="enableMultiWebhook" class="form-label">Enable multi-webhook upload</label>
             </div>
 
             <div class="form-group" style="margin-top: 16px;">
@@ -396,10 +417,14 @@
             to be set.</div>
 
           <div id="autoUploadSettings" class="form-group sub-settings hidden" style="margin-left: 20px; margin-top: 10px;">
-            <label class="form-label">Target Webhook</label>
-            <select id="autoUploadWebhook" class="form-control" style="margin-bottom: 10px;">
-              <option value="">Select Webhook...</option>
-            </select>
+            <label class="form-label">Target Webhooks</label>
+            <div class="multi-webhook-dropdown" id="autoUploadWebhookDropdown" style="margin-bottom: 10px;">
+              <button type="button" class="form-control multi-webhook-trigger" id="autoUploadWebhookTrigger">
+                <span id="autoUploadWebhookSummary">Select webhooks...</span>
+                <span class="dropdown-arrow">&#9660;</span>
+              </button>
+              <div class="multi-webhook-panel hidden" id="autoUploadWebhookPanel"></div>
+            </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
               <div class="form-group">
@@ -414,12 +439,7 @@
               </div>
             </div>
 
-            <div class="checkbox-group">
-              <input type="checkbox" id="autoUploadForumChannel" class="checkbox" checked />
-              <label for="autoUploadForumChannel" class="form-label">Forum Channel Support</label>
-            </div>
-
-            <div class="checkbox-group">
+            <div id="autoUploadSingleThreadContainer" class="checkbox-group hidden">
               <input type="checkbox" id="autoUploadSingleThread" class="checkbox" />
               <label for="autoUploadSingleThread" class="form-label">Single Thread Mode</label>
             </div>

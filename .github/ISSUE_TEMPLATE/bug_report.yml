@@ -42,8 +42,8 @@ body:
     id: version
     attributes:
       label: App Version
-      description: What version of VRChat Photo Uploader are you using?
-      placeholder: "e.g., 3.0.3"
+      description: What version of VRChat Photo Uploader are you using? (shown in the title bar)
+      placeholder: "e.g., 4.1.0"
     validations:
       required: true
 
@@ -59,18 +59,36 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: upload_mode
+    attributes:
+      label: Upload Mode
+      description: Were you using manual upload or background auto-upload?
+      options:
+        - Manual Upload
+        - Background Auto-Upload
+        - Both
+        - N/A
+    validations:
+      required: false
+
   - type: textarea
     id: settings
     attributes:
       label: Relevant Settings
       description: Please share your upload settings if relevant to the issue.
       placeholder: |
-        - Forum Channel: Yes/No
+        - Webhook type: Regular / Forum Channel
+        - Multi-Webhook Upload: Enabled/Disabled
+        - Number of webhooks selected: ...
         - Smart Grouping: On/Off
         - Group by World: Yes/No
         - Group by Time: Yes/No
         - Time Window: ...
         - Images per Message: ...
+        - Include Player Names: Yes/No
+        - Discord Player Tagging: Yes/No
+        - Single Thread Mode: Yes/No
     validations:
       required: false
 

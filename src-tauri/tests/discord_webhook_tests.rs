@@ -196,6 +196,7 @@ async fn test_send_image_with_metadata_message() {
     )];
     let players = vec![make_player("Alice"), make_player("Bob")];
 
+    let no_mappings = std::collections::HashMap::new();
     let (text_fields, _overflow) = create_discord_payload(
         &worlds,
         &players,
@@ -206,6 +207,7 @@ async fn test_send_image_with_metadata_message() {
         None,  // thread_id
         true,  // include_player_names
         1,     // image_count
+        &no_mappings,
     );
 
     let mut payload = UploadPayload::new();
@@ -251,6 +253,7 @@ async fn test_send_message_with_player_list() {
         .map(|i| make_player(&format!("TestPlayer_{i:02}")))
         .collect();
 
+    let no_mappings = std::collections::HashMap::new();
     let (text_fields, overflow_messages) = create_discord_payload(
         &worlds,
         &players,
@@ -261,6 +264,7 @@ async fn test_send_message_with_player_list() {
         None,  // thread_id
         true,  // include_player_names
         3,     // image_count
+        &no_mappings,
     );
 
     let client = DiscordClient::new();

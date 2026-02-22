@@ -3,6 +3,9 @@ use uuid::Uuid;
 
 use crate::commands::UploadProgress;
 use crate::errors::{AppError, AppResult, ProgressState};
+use crate::uploader::progress_tracker::{
+    emit_session_progress, is_session_cancelled, mark_session_completed,
+};
 use crate::{database, security, uploader};
 
 /// Central manager for upload sessions to ensure unified behavior
@@ -10,11 +13,10 @@ pub struct SessionManager;
 
 #[derive(Debug, Clone)]
 pub struct SessionOptions {
-    pub webhook_id: i64,
+    pub webhook_ids: Vec<i64>,
     pub file_paths: Vec<String>,
     pub group_by_metadata: bool,
     pub max_images_per_message: u8,
-    pub is_forum_channel: bool,
     pub include_player_names: bool,
     pub grouping_time_window: u32,
     pub group_by_world: bool,
@@ -25,7 +27,8 @@ pub struct SessionOptions {
 }
 
 impl SessionManager {
-    /// Starts a new upload session, handling all validation and initialization
+    /// Starts a new upload session, handling all validation and initialization.
+    /// Supports multiple webhooks — processes them sequentially within a single session.
     pub async fn start_session(
         app_handle: &tauri::AppHandle,
         options: SessionOptions,
@@ -40,40 +43,44 @@ impl SessionManager {
             });
         }
 
-        if options.webhook_id <= 0 {
+        if options.webhook_ids.is_empty() {
             return Err(AppError::UploadFailed {
-                reason: "Invalid webhook ID".to_string(),
+                reason: "No webhooks specified".to_string(),
             });
         }
 
-        // 2. Forum specific constraints
-        let effective_max_images =
-            if options.is_forum_channel && options.max_images_per_message > 10 {
-                log::warn!(
-                    "Forum channel detected with max_images > 10. Reducing to 10 for reliability."
-                );
-                10
-            } else {
-                options.max_images_per_message
-            };
+        for id in &options.webhook_ids {
+            if *id <= 0 {
+                return Err(AppError::UploadFailed {
+                    reason: "Invalid webhook ID".to_string(),
+                });
+            }
+        }
 
-        // 3. File path validation
+        // 2. File path validation
         for file_path in &options.file_paths {
             security::InputValidator::validate_image_file(file_path)?;
         }
 
-        // 4. Fetch Webhook
-        let webhook = match database::get_webhook_by_id(options.webhook_id).await {
-            Ok(w) => w,
-            Err(AppError::Database(sqlx::Error::RowNotFound)) => {
-                return Err(AppError::UploadFailed {
-                    reason: "Selected webhook not found".to_string(),
-                });
-            }
-            Err(e) => return Err(e),
-        };
+        // 3. Fetch ALL webhooks (fail fast if any not found)
+        let mut webhooks = Vec::new();
+        for id in &options.webhook_ids {
+            let webhook = match database::get_webhook_by_id(*id).await {
+                Ok(w) => w,
+                Err(AppError::Database(sqlx::Error::RowNotFound)) => {
+                    return Err(AppError::UploadFailed {
+                        reason: format!("Webhook with ID {id} not found"),
+                    });
+                }
+                Err(e) => return Err(e),
+            };
+            webhooks.push(webhook);
+        }
 
-        // 5. Initialize Progress State
+        let num_webhooks = webhooks.len();
+        let total_images = options.file_paths.len() * num_webhooks;
+
+        // 4. Initialize Progress State
         {
             let mut progress = progress_state
                 .lock()
@@ -81,7 +88,7 @@ impl SessionManager {
             progress.insert(
                 session_id.clone(),
                 UploadProgress {
-                    total_images: options.file_paths.len(),
+                    total_images,
                     completed: 0,
                     current_image: None,
                     current_progress: 0.0,
@@ -89,25 +96,25 @@ impl SessionManager {
                     successful_uploads: Vec::new(),
                     session_status: "active".to_string(),
                     estimated_time_remaining: None,
+                    current_webhook_index: 0,
+                    total_webhooks: num_webhooks,
+                    current_webhook_name: webhooks[0].name.clone(),
                 },
             );
         }
 
-        // 6. Database Records
+        // 5. Database Records (use first webhook ID for the session record)
         database::create_upload_session(
             session_id.clone(),
-            options.webhook_id,
-            options.file_paths.len() as i32,
+            options.webhook_ids[0],
+            total_images as i32,
         )
         .await?;
-        database::update_webhook_usage(options.webhook_id).await?;
+        for id in &options.webhook_ids {
+            database::update_webhook_usage(*id).await?;
+        }
 
-        // 7. Spawn Upload Task
-        let handle_clone = app_handle.clone();
-        let session_id_clone = session_id.clone();
-        let progress_state_clone = progress_state.inner().clone();
-
-        // Load config for defaults if quality/format are missing
+        // 6. Load config for defaults if quality/format are missing
         let config = crate::config::load_config().ok();
         let quality = options
             .upload_quality
@@ -118,25 +125,106 @@ impl SessionManager {
             .or(config.as_ref().map(|c| c.compression_format.clone()))
             .unwrap_or_else(|| "webp".to_string());
 
+        // 7. Spawn Coordinator Task
+        let handle_clone = app_handle.clone();
+        let session_id_clone = session_id.clone();
+        let progress_state_clone = progress_state.inner().clone();
+
         tokio::spawn(async move {
-            uploader::process_upload_queue(
-                webhook,
-                options.file_paths,
-                options.group_by_metadata,
-                effective_max_images,
-                options.is_forum_channel,
-                options.include_player_names,
-                options.grouping_time_window,
-                options.group_by_world,
-                Some(quality),
-                Some(format),
-                options.single_thread_mode,
-                options.merge_no_metadata,
-                progress_state_clone,
-                session_id_clone,
-                handle_clone,
-            )
-            .await;
+            for (idx, webhook) in webhooks.into_iter().enumerate() {
+                // Check cancellation before each webhook
+                if is_session_cancelled(&progress_state_clone, &session_id_clone) {
+                    log::info!(
+                        "Session {} cancelled before webhook {}/{}",
+                        session_id_clone,
+                        idx + 1,
+                        num_webhooks
+                    );
+                    return;
+                }
+
+                // Update current_webhook_index, name, reset status and clear per-webhook state
+                {
+                    if let Ok(mut progress) = progress_state_clone.lock() {
+                        if let Some(p) = progress.get_mut(&session_id_clone) {
+                            p.current_webhook_index = idx;
+                            p.current_webhook_name = webhook.name.clone();
+                            p.session_status = "active".to_string();
+                            // Clear successful/failed uploads so frontend resets item states
+                            p.successful_uploads.clear();
+                            p.failed_uploads.clear();
+                        }
+                    }
+                }
+
+                let effective_max_images =
+                    if webhook.is_forum && options.max_images_per_message > 10 {
+                        log::warn!(
+                            "Forum channel detected for webhook '{}', reducing max_images to 10.",
+                            webhook.name
+                        );
+                        10
+                    } else {
+                        options.max_images_per_message
+                    };
+
+                log::info!(
+                    "Session {} starting webhook {}/{} ('{}')",
+                    session_id_clone,
+                    idx + 1,
+                    num_webhooks,
+                    webhook.name
+                );
+
+                uploader::process_upload_queue(
+                    webhook,
+                    options.file_paths.clone(),
+                    options.group_by_metadata,
+                    effective_max_images,
+                    options.include_player_names,
+                    options.grouping_time_window,
+                    options.group_by_world,
+                    Some(quality),
+                    Some(format.clone()),
+                    options.single_thread_mode,
+                    options.merge_no_metadata,
+                    progress_state_clone.clone(),
+                    session_id_clone.clone(),
+                    handle_clone.clone(),
+                    false, // coordinator handles completion
+                )
+                .await;
+
+                // Check post-upload status: if failed or cancelled, stop iterating
+                let should_stop = {
+                    if let Ok(progress) = progress_state_clone.lock() {
+                        if let Some(p) = progress.get(&session_id_clone) {
+                            p.session_status == "failed" || p.session_status == "cancelled"
+                        } else {
+                            true // session missing, stop
+                        }
+                    } else {
+                        true // lock failed, stop
+                    }
+                };
+
+                if should_stop {
+                    log::info!(
+                        "Session {} stopped after webhook {}/{} (status changed)",
+                        session_id_clone,
+                        idx + 1,
+                        num_webhooks
+                    );
+                    return;
+                }
+
+                // process_upload_queue leaves status as "active" (mark_completed=false)
+                // Coordinator continues to next webhook
+            }
+
+            // All webhooks done — mark truly completed
+            mark_session_completed(&progress_state_clone, &session_id_clone);
+            emit_session_progress(&handle_clone, &progress_state_clone, &session_id_clone);
         });
 
         Ok(session_id)
