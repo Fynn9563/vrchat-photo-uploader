@@ -657,12 +657,31 @@ pub async fn get_file_hash(file_path: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn cleanup_temp_files(temp_filenames: Vec<String>) -> Result<(), String> {
+    let temp_dir = std::env::temp_dir();
+    let canonical_temp = temp_dir
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve temp directory: {e}"))?;
+
     for filename in temp_filenames {
-        let temp_dir = std::env::temp_dir();
+        // Security: reject filenames with path separators or traversal
+        if filename.contains('/')
+            || filename.contains('\\')
+            || filename.contains("..")
+            || filename.is_empty()
+        {
+            log::warn!("Rejected invalid temp filename: {filename}");
+            continue;
+        }
+
         let full_path = temp_dir.join(&filename);
 
-        if full_path.exists() {
-            if let Err(e) = std::fs::remove_file(&full_path) {
+        // Security: canonicalize and verify containment within temp directory
+        if let Ok(canonical) = full_path.canonicalize() {
+            if !canonical.starts_with(&canonical_temp) {
+                log::warn!("Rejected temp file outside temp directory: {filename}");
+                continue;
+            }
+            if let Err(e) = std::fs::remove_file(&canonical) {
                 log::warn!("Failed to cleanup temp file {filename}: {e}");
             } else {
                 log::debug!("Cleaned up temp file: {filename}");
@@ -710,6 +729,27 @@ pub async fn debug_extract_metadata(file_path: String) -> Result<String, String>
 #[tauri::command]
 pub async fn shell_open(path: String) -> Result<(), String> {
     use std::process::Command;
+
+    // Security: reject URL schemes — shell_open should only open local directories
+    let lower = path.to_lowercase();
+    if lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("ftp://")
+        || lower.starts_with("file://")
+    {
+        return Err("Cannot open URLs — only local directories are allowed".to_string());
+    }
+
+    // Security: reject path traversal
+    if path.contains("..") {
+        return Err("Path traversal is not allowed".to_string());
+    }
+
+    // Security: verify the path is an existing directory
+    let p = std::path::Path::new(&path);
+    if !p.is_dir() {
+        return Err("Path is not an existing directory".to_string());
+    }
 
     #[cfg(target_os = "windows")]
     {

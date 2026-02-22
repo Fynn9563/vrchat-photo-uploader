@@ -9,6 +9,13 @@ const appWindow = getCurrentWebviewWindow()
 
 console.log('VRChat Photo Uploader starting...');
 
+/** Escape user-controlled strings before inserting into innerHTML templates. */
+function escapeHtml(str: string): string {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 interface Webhook {
   id: number;
   name: string;
@@ -396,7 +403,7 @@ class AppState {
 
       if (!img) {
         // Clear placeholder text and inject img
-        element.innerHTML = `<img src="${convertFileSrc(item.thumbnailPath)}" alt="${item.filename}" class="queue-thumbnail-img" loading="lazy" />`;
+        element.innerHTML = `<img src="${convertFileSrc(item.thumbnailPath)}" alt="${escapeHtml(item.filename)}" class="queue-thumbnail-img" loading="lazy" />`;
         item.thumbnailLoaded = true;
       } else {
         img.src = convertFileSrc(item.thumbnailPath);
@@ -795,7 +802,7 @@ class AppState {
       } else {
         statusIcon = '<span class="status-icon">📄</span>';
       }
-      statusEl.innerHTML = `${item.statusText || item.status} ${statusIcon}`;
+      statusEl.innerHTML = `${escapeHtml(item.statusText || item.status)} ${statusIcon}`;
     }
 
     // Update progress bar
@@ -844,20 +851,20 @@ class AppState {
       <input type="checkbox" class="queue-checkbox" ${item.selected ? 'checked' : ''}>
       <div class="queue-thumbnail" data-item-id="${item.id}">
         ${item.thumbnailPath ?
-        `<img src="${thumbSrc}" alt="${item.filename}" class="queue-thumbnail-img" loading="lazy" />` :
-        item.filename.substring(0, 3).toUpperCase()
+        `<img src="${thumbSrc}" alt="${escapeHtml(item.filename)}" class="queue-thumbnail-img" loading="lazy" />` :
+        escapeHtml(item.filename.substring(0, 3).toUpperCase())
       }
       </div>
       <div class="queue-info">
-        <div class="queue-filename">${item.filename}</div>
-        <div class="queue-status">${item.statusText || item.status} ${statusIcon}</div>
+        <div class="queue-filename">${escapeHtml(item.filename)}</div>
+        <div class="queue-status">${escapeHtml(item.statusText || item.status)} ${statusIcon}</div>
         <div class="queue-size">${sizeText} ${dimensionsText}</div>
         ${item.status === 'uploading' ? `
           <div class="queue-progress">
             <div class="queue-progress-bar" style="width: ${item.progress}%"></div>
           </div>
         ` : ''}
-        ${item.error ? `<div class="error-message">${item.error}</div>` : ''}
+        ${item.error ? `<div class="error-message">${escapeHtml(item.error)}</div>` : ''}
       </div>
       <div class="queue-actions">
         ${item.status === 'error' && item.retryCount < 3 ? `
@@ -2302,7 +2309,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const updateStatus = document.getElementById('updateStatus');
     if (updateStatus) {
       updateStatus.style.display = 'block';
-      updateStatus.innerHTML = `✅ Update available: v${event.payload.version}<br><small>The update will be installed automatically.</small>`;
+      updateStatus.innerHTML = `✅ Update available: v${escapeHtml(String(event.payload.version))}<br><small>The update will be installed automatically.</small>`;
       updateStatus.className = 'update-status success';
     }
 
@@ -2717,7 +2724,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     listContainer.innerHTML = ignoredFolders.map((folder, index) => `
       <div class="ignored-folder-item" style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: var(--bg-secondary); border-radius: 4px; margin-bottom: 4px;">
-        <span style="font-size: 0.875rem;">📁 ${folder}</span>
+        <span style="font-size: 0.875rem;">📁 ${escapeHtml(folder)}</span>
         <button type="button" class="remove-ignored-folder-btn" data-index="${index}" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 6px; font-size: 0.875rem;">✕</button>
       </div>
     `).join('');
@@ -3053,7 +3060,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (error) {
       console.error('Failed to check for updates:', error);
       if (updateStatus) {
-        updateStatus.innerHTML = `❌ Failed to check for updates: ${error}`;
+        updateStatus.innerHTML = `❌ Failed to check for updates: ${escapeHtml(String(error))}`;
         updateStatus.className = 'update-status error';
       }
     }
@@ -3591,9 +3598,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const row = document.createElement('tr');
         row.style.borderBottom = '1px solid var(--border-color)';
         row.innerHTML = `
-          <td style="padding: 4px;"><strong>${label}</strong></td>
+          <td style="padding: 4px;"><strong>${escapeHtml(label)}</strong></td>
           <td style="padding: 4px;">→</td>
-          <td style="padding: 4px;">${webhookName}</td>
+          <td style="padding: 4px;">${escapeHtml(webhookName)}</td>
           <td style="padding: 4px; text-align: right;">
             <button class="btn btn-small btn-secondary delete-override-btn" data-id="${ov.id}">🗑️</button>
           </td>
@@ -3712,9 +3719,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const row = document.createElement('tr');
         row.style.borderBottom = '1px solid var(--border-color)';
         row.innerHTML = `
-          <td style="padding: 4px;"><strong>${label}</strong></td>
+          <td style="padding: 4px;"><strong>${escapeHtml(label)}</strong></td>
           <td style="padding: 4px;">→</td>
-          <td style="padding: 4px;"><code>&lt;@${m.discord_user_id}&gt;</code></td>
+          <td style="padding: 4px;"><code>&lt;@${escapeHtml(m.discord_user_id)}&gt;</code></td>
           <td style="padding: 4px; text-align: right;">
             <button class="btn btn-small btn-secondary delete-discord-mapping-btn" data-id="${m.id}">🗑️</button>
           </td>

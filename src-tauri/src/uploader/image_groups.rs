@@ -73,7 +73,7 @@ pub async fn group_images_by_metadata(
             // Emit progress
             let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
             // Emit batch updates to avoid flooding event loop for 5000 items
-            if done % 5 == 0 || done == total_files {
+            if done.is_multiple_of(5) || done == total_files {
                 app_handle.emit("upload-progress", serde_json::json!({
                     "session_id": session_id,
                     "total_images": total_files,
@@ -117,9 +117,9 @@ pub async fn group_images_by_metadata(
                 last_valid_group_key = Some(key.clone());
             }
             key
-        } else if merge_no_metadata && last_valid_group_key.is_some() {
+        } else if let Some(prev_key) = last_valid_group_key.as_ref().filter(|_| merge_no_metadata) {
             // If merging is enabled and we have a previous group, use it!
-            let key = last_valid_group_key.as_ref().unwrap().clone();
+            let key = prev_key.clone();
             log::info!("Merging no-metadata file {file_path} into previous group: {key}");
             key
         } else if no_time_limit {
