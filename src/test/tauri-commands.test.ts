@@ -13,7 +13,7 @@ describe('Tauri Command Invocations', () => {
         { id: 1, name: 'Test', url: 'https://discord.com/api/webhooks/1/abc', is_forum: false }
       ]);
 
-      const result = await invoke('get_webhooks');
+      const result = await invoke('get_webhooks') as Array<{ name: string }>;
       expect(mockTauri.invoke).toHaveBeenCalledWith('get_webhooks');
       expect(result).toHaveLength(1);
       expect(result[0].name).toBe('Test');
@@ -98,7 +98,7 @@ describe('Tauri Command Invocations', () => {
       };
       mockTauri.invoke.mockResolvedValueOnce(mockProgress);
 
-      const result = await invoke('get_upload_progress', { sessionId: 'session_123' });
+      const result = await invoke('get_upload_progress', { sessionId: 'session_123' }) as typeof mockProgress;
 
       expect(mockTauri.invoke).toHaveBeenCalledWith('get_upload_progress', { sessionId: 'session_123' });
       expect(result.total_images).toBe(5);
@@ -139,7 +139,7 @@ describe('Tauri Command Invocations', () => {
       };
       mockTauri.invoke.mockResolvedValueOnce(mockConfig);
 
-      const result = await invoke('get_app_config');
+      const result = await invoke('get_app_config') as typeof mockConfig;
 
       expect(mockTauri.invoke).toHaveBeenCalledWith('get_app_config');
       expect(result.upload_quality).toBe(85);
@@ -170,7 +170,7 @@ describe('Tauri Command Invocations', () => {
       };
       mockTauri.invoke.mockResolvedValueOnce(mockMetadata);
 
-      const result = await invoke('get_image_metadata', { filePath: '/photos/test.png' });
+      const result = await invoke('get_image_metadata', { filePath: '/photos/test.png' }) as typeof mockMetadata;
 
       expect(mockTauri.invoke).toHaveBeenCalledWith('get_image_metadata', { filePath: '/photos/test.png' });
       expect(result.world.name).toBe('Test World');
