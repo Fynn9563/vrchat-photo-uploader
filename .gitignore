@@ -36,3 +36,13 @@ tauri_*
 # Environment variables
 .env
 .env.*
+!.env.example
+
+# Dev notes (local only, not for VCS)
+.dev/
+
+# Windows junk
+Thumbs.db
+
+# Stray shell artifacts
+~/

@@ -1,6 +1,6 @@
 use crate::errors::{AppError, AppResult};
 use regex::Regex;
-use std::path::Path;
+use std::path::{Component, Path};
 
 pub struct InputValidator;
 
@@ -67,8 +67,13 @@ impl InputValidator {
 
         let path_obj = Path::new(path);
 
-        // Check for path traversal attempts
-        if path.contains("..") || path.contains("~") {
+        let has_parent_dir = path_obj
+            .components()
+            .any(|c| matches!(c, Component::ParentDir));
+        let starts_with_tilde =
+            path.starts_with('~') || path.starts_with("~/") || path.starts_with("~\\");
+
+        if has_parent_dir || starts_with_tilde {
             return Err(AppError::validation(
                 "file_path",
                 "Invalid file path detected",
@@ -326,7 +331,10 @@ mod tests {
         let invalid_paths = vec![
             ("", "empty path"),
             ("../etc/passwd", "path traversal"),
+            ("..\\windows\\system32\\file.png", "windows path traversal"),
+            ("foo/../../etc/passwd", "embedded path traversal"),
             ("~/secret/file.png", "home directory traversal"),
+            ("~\\secret\\file.png", "windows home directory traversal"),
             ("file.txt", "not an image extension"),
             ("file.exe", "executable file"),
             ("image", "no extension"),
@@ -336,6 +344,27 @@ mod tests {
             assert!(
                 InputValidator::validate_file_path(path).is_err(),
                 "Invalid path '{path}' should fail validation ({reason})"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_file_path_allows_dots_and_tildes_in_names() {
+        let temp_dir = std::env::temp_dir();
+        let cases = vec!["screenshot..png", "PROGRA~1.png", "photo..backup.png"];
+
+        for name in cases {
+            let path = temp_dir.join(name);
+            File::create(&path).expect("create temp file");
+
+            let result = InputValidator::validate_file_path(&path.to_string_lossy());
+            let _ = std::fs::remove_file(&path);
+
+            assert!(
+                result.is_ok(),
+                "Path '{}' should pass validation but got: {:?}",
+                path.display(),
+                result.err()
             );
         }
     }
