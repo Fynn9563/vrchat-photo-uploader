@@ -388,8 +388,7 @@ fn create_message_content_with_players(
                 content.push_str(&first_player);
                 had_players_in_main = true;
 
-                let mut players_added = 1;
-                for player in all_players.iter().skip(1) {
+                for (players_added, player) in (1..).zip(all_players.iter().skip(1)) {
                     let player_str = format_player_for_discord(player, discord_mappings);
                     let addition = format!(", {player_str}");
 
@@ -406,7 +405,6 @@ fn create_message_content_with_players(
                         break;
                     }
                     content.push_str(&addition);
-                    players_added += 1;
                 }
             } else {
                 // Can't fit any players, all go to overflow
