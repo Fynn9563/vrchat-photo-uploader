@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.1.1] - 2026-04-26
+
+### Fixed
+- Embed Metadata no longer fails with "Invalid file path detected" for valid PNG files whose filename contains two consecutive dots, or whose path contains a tilde (such as Windows short folder names like `PROGRA~1`)
+
+### Security
+- Updated networking and archive-handling dependencies to patch known vulnerabilities
+
 ## [4.1.0] - 2026-02-23
 
 ### Added
